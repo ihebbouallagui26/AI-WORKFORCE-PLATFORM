@@ -1,0 +1,158 @@
+<div class="page">
+  <ui-page-header
+    heading="Organization"
+    [description]="workspace.currentOrganization()?.description ?? 'Departments, teams, people and AI agents.'"
+  >
+    <a class="btn btn--secondary" routerLink="/settings/organization"><ui-icon name="settings" [size]="15" /> Settings</a>
+    <button type="button" class="btn btn--primary" (click)="creating.set(true)"><ui-icon name="plus" [size]="15" /> New department</button>
+  </ui-page-header>
+
+  <section class="grid grid--stats org-stats" aria-label="Organization overview">
+    <ui-stat-card label="Departments" icon="building" [value]="totals().departments" />
+    <ui-stat-card label="Teams" icon="users" [value]="totals().teams" />
+    <ui-stat-card label="People" icon="user" tone="accent" [value]="totals().people" />
+    <ui-stat-card label="AI agents" icon="agent" tone="ai" [value]="totals().agents" />
+  </section>
+
+  @if (store.loading()) {
+    <ui-skeleton [rows]="8" label="Loading organization" />
+  } @else if (store.error(); as error) {
+    <ui-empty-state icon="circle-alert" tone="danger" heading="Organization could not be loaded" [description]="error">
+      <button type="button" class="btn btn--secondary" (click)="store.reload()">Retry</button>
+    </ui-empty-state>
+  } @else {
+    <div class="org-layout">
+      <nav class="departments" aria-label="Departments">
+        <p class="caps-label departments__label">Departments</p>
+        <button type="button" class="departments__item" [class.is-active]="!selectedDepartment()" [attr.aria-current]="!selectedDepartment() ? 'true' : null" (click)="selectDepartment(null)">
+          <ui-icon name="organization" [size]="15" />
+          <span class="departments__name">Whole organization</span>
+          <span class="departments__count tabular">{{ totals().people + totals().agents }}</span>
+        </button>
+        @for (node of store.departmentsFlat(); track node.department.id) {
+          <button
+            type="button"
+            class="departments__item"
+            [class.is-active]="selectedDepartment()?.id === node.department.id"
+            [attr.aria-current]="selectedDepartment()?.id === node.department.id ? 'true' : null"
+            [style.padding-left.px]="12 + node.depth * 16"
+            (click)="selectDepartment(node.department.id)"
+          >
+            <span class="departments__code">{{ node.department.code }}</span>
+            <span class="departments__name">{{ node.department.name }}</span>
+            <span class="departments__count tabular">{{ countFor(node.department.id) }}</span>
+          </button>
+        }
+      </nav>
+
+      <div class="stack">
+        @if (selectedDepartment(); as department) {
+          <ui-panel [heading]="department.name" [subheading]="department.code + ' · ' + countFor(department.id) + ' members'">
+            <p class="department__description">{{ department.description || 'No description.' }}</p>
+            <dl class="meta-list">
+              <dt>Department head</dt>
+              <dd>
+                @if (department.managerRef) {
+                  <ui-member [ref]="department.managerRef" [showRole]="true" />
+                } @else {
+                  <span class="text-tertiary">No manager assigned</span>
+                }
+              </dd>
+              <dt>Parent</dt>
+              <dd>
+                @if (department.parentId && store.departmentById().get(department.parentId); as parent) {
+                  <button type="button" class="link-button" (click)="selectDepartment(parent.id)">{{ parent.name }}</button>
+                } @else {
+                  <span class="text-tertiary">Top level</span>
+                }
+              </dd>
+              @if (subDepartments().length) {
+                <dt>Sub-departments</dt>
+                <dd class="chip-list">
+                  @for (child of subDepartments(); track child.id) {
+                    <button type="button" class="chip chip-button" (click)="selectDepartment(child.id)">{{ child.name }}</button>
+                  }
+                </dd>
+              }
+            </dl>
+          </ui-panel>
+
+          @if (departmentTeams().length) {
+            <div class="grid grid--halves">
+              @for (team of departmentTeams(); track team.id) {
+                <ui-panel [heading]="team.name" [subheading]="team.memberRefs.length + 1 + ' members'">
+                  <div class="team">
+                    <span class="caps-label">Lead</span>
+                    @if (team.leadRef) {
+                      <ui-member [ref]="team.leadRef" [showRole]="true" />
+                    }
+                    <span class="caps-label team__members-label">Members</span>
+                    <ui-avatar-stack [refs]="team.memberRefs" [max]="8" />
+                  </div>
+                </ui-panel>
+              }
+            </div>
+          }
+        } @else {
+          <ui-panel heading="Structure" subheading="Select a department to see its people, agents and teams">
+            <app-org-chart [tree]="store.departmentTree()" (selected)="selectDepartment($event)" />
+          </ui-panel>
+        }
+
+        <ui-panel heading="Members" [subheading]="members().length + ' shown'" [flush]="true">
+          <div panelActions class="members-tools">
+            <ui-search-input class="members-search" placeholder="Search members" label="Search members" [(value)]="query" />
+            <ui-segmented label="Member type" [options]="kindOptions" [(value)]="kind" />
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Member</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Department</th>
+                  <th scope="col">Reports to</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (profile of members(); track profile.key) {
+                  <tr>
+                    <td><ui-member [ref]="profile.ref" [showRole]="true" [showStatus]="true" /></td>
+                    <td>
+                      @if (profile.kind === 'agent') {
+                        <span class="chip chip--ai"><ui-icon name="agent" [size]="12" /> AI agent</span>
+                      } @else {
+                        <span class="chip"><ui-icon name="user" [size]="12" /> Human</span>
+                      }
+                    </td>
+                    <td>{{ profile.departmentName }}</td>
+                    <td>
+                      @if (reportsTo(profile); as manager) {
+                        <ui-member [ref]="manager" size="xs" />
+                      } @else {
+                        <span class="text-tertiary">—</span>
+                      }
+                    </td>
+                    <td><ui-badge [presentation]="statuses[profile.status]" /></td>
+                    <td class="actions-cell">
+                      <button type="button" class="btn btn--ghost btn--sm" (click)="openMember(profile)" [attr.aria-label]="'View ' + profile.name">
+                        View <ui-icon name="chevron-right" [size]="14" />
+                      </button>
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr><td colspan="6"><ui-empty-state [compact]="true" icon="users" heading="No members match" /></td></tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </ui-panel>
+      </div>
+    </div>
+  }
+</div>
+
+<app-department-form-modal [open]="creating()" (closed)="creating.set(false)" (created)="onCreated($event)" />
+<app-employee-detail-modal [employee]="selectedEmployee()" (closed)="closeMember()" />

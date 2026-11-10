@@ -1,0 +1,83 @@
+<div class="board" role="list" aria-label="Task board">
+  @for (column of columns(); track column.status) {
+    <section
+      class="column"
+      role="listitem"
+      [class.is-drop-target]="dragOver() === column.status"
+      [attr.aria-label]="statuses[column.status].label + ', ' + column.tasks.length + ' tasks'"
+      (dragover)="onDragOver($event, column.status)"
+      (dragleave)="onDragLeave($event, column.status)"
+      (drop)="onDrop($event, column.status)"
+    >
+      <header class="column__header">
+        <span class="column__dot" [class]="'column__dot column__dot--' + statuses[column.status].tone" aria-hidden="true"></span>
+        <h3 class="column__title">{{ statuses[column.status].label }}</h3>
+        <span class="column__count tabular">{{ column.tasks.length }}</span>
+        <button type="button" class="btn btn--ghost btn--icon btn--sm column__add" [attr.aria-label]="'Add task to ' + statuses[column.status].label" (click)="addTask.emit(column.status)">
+          <ui-icon name="plus" [size]="14" />
+        </button>
+      </header>
+
+      <ul class="column__list">
+        @for (task of column.tasks; track task.id) {
+          <li
+            class="card"
+            draggable="true"
+            [class.is-dragging]="draggingId() === task.id"
+            (dragstart)="onDragStart($event, task)"
+            (dragend)="onDragEnd()"
+          >
+            <div class="card__top">
+              <span class="card__key mono">{{ task.key }}</span>
+              <span class="card__priority" [class]="'card__priority card__priority--' + task.priority">{{ priorities[task.priority].label }}</span>
+              <ui-dropdown class="card__menu" align="end" #menu="uiDropdown" [width]="180">
+                <button
+                  type="button"
+                  dropdownTrigger
+                  class="btn btn--ghost btn--icon btn--sm"
+                  aria-haspopup="menu"
+                  [attr.aria-expanded]="menu.isOpen()"
+                  [attr.aria-label]="'Move ' + task.key"
+                  (click)="menu.toggle()"
+                >
+                  <ui-icon name="more" [size]="15" />
+                </button>
+                <p class="menu-label">Move to</p>
+                @for (status of order; track status) {
+                  <button type="button" class="menu-item" [disabled]="status === task.status" (click)="move(task.id, status)">
+                    {{ statuses[status].label }}
+                    @if (status === task.status) {
+                      <ui-icon class="menu-item__check" name="check" [size]="14" />
+                    }
+                  </button>
+                }
+              </ui-dropdown>
+            </div>
+            <button type="button" class="card__title" (click)="openTask.emit(task)">{{ task.title }}</button>
+            @if (task.labels.length) {
+              <div class="chip-list">
+                @for (label of task.labels; track label) {
+                  <span class="chip card__label">{{ label }}</span>
+                }
+              </div>
+            }
+            <div class="card__footer">
+              @if (task.assigneeRef) {
+                <ui-member [ref]="task.assigneeRef" size="xs" />
+              } @else {
+                <span class="card__unassigned">Unassigned</span>
+              }
+              @if (task.dueDate) {
+                <span class="card__due" [class.is-overdue]="isOverdue(task)">
+                  <ui-icon name="calendar" [size]="12" /> {{ task.dueDate | relativeTime }}
+                </span>
+              }
+            </div>
+          </li>
+        } @empty {
+          <li class="column__empty">Drop tasks here</li>
+        }
+      </ul>
+    </section>
+  }
+</div>

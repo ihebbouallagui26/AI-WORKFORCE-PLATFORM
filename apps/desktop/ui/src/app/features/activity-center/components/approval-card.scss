@@ -1,0 +1,109 @@
+:host {
+  --risk-color: var(--color-text-tertiary);
+  display: block;
+}
+
+:host(.risk-medium) {
+  --risk-color: var(--color-info);
+}
+
+:host(.risk-high) {
+  --risk-color: var(--color-warning);
+}
+
+:host(.risk-critical) {
+  --risk-color: var(--color-danger);
+}
+
+.approval {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+  transition: border-color var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard);
+}
+
+:host(.is-focused) .approval {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.approval__rail {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--risk-color);
+}
+
+.approval__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.approval__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.approval__agent {
+  color: inherit;
+
+  &:hover {
+    text-decoration: none;
+  }
+}
+
+.approval__action {
+  margin-top: var(--space-1);
+  font-size: var(--text-md);
+}
+
+.approval__description {
+  color: var(--color-text-secondary);
+}
+
+.approval__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.approval__project,
+.approval__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.approval__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.approval__decision {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.approval__note {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}

@@ -1,0 +1,145 @@
+// Design tokens — single source of truth for the visual language.
+// Components must consume these CSS custom properties, never raw values.
+
+:root {
+  color-scheme: dark;
+
+  // Surfaces (darkest → lightest)
+  --color-bg-sidebar: #0b0d10;
+  --color-bg-app: #0f1115;
+  --color-surface-1: #15181d;
+  --color-surface-2: #1a1e24;
+  --color-surface-3: #21262e;
+  --color-surface-hover: #1e232a;
+  --color-surface-active: #262c35;
+  --color-overlay: rgb(5 6 8 / 72%);
+
+  // Borders
+  --color-border-subtle: #1f242b;
+  --color-border: #2a3039;
+  --color-border-strong: #39404b;
+
+  // Text
+  --color-text-primary: #e7e9ee;
+  --color-text-secondary: #a5acb8;
+  --color-text-tertiary: #7f8796;
+  --color-text-disabled: #5a616d;
+  --color-text-inverse: #0f1115;
+
+  // Accent (refined indigo-blue)
+  --color-accent: #5b7cfa;
+  --color-accent-hover: #7090ff;
+  --color-accent-active: #4a69e0;
+  --color-accent-subtle: rgb(91 124 250 / 14%);
+  --color-accent-text: #a3b4ff;
+
+  // Semantic
+  --color-success: #2fbf8a;
+  --color-success-subtle: rgb(47 191 138 / 13%);
+  --color-warning: #e3a43a;
+  --color-warning-subtle: rgb(227 164 58 / 13%);
+  --color-danger: #df6461;
+  --color-danger-hover: #e87875;
+  --color-danger-subtle: rgb(223 100 97 / 13%);
+  --color-info: #4ea3e6;
+  --color-info-subtle: rgb(78 163 230 / 13%);
+  --color-neutral: #7f8796;
+  --color-neutral-subtle: rgb(127 135 150 / 14%);
+
+  // Identity: AI agents are always marked with this hue, humans stay neutral.
+  --color-ai: #a08cf2;
+  --color-ai-subtle: rgb(160 140 242 / 14%);
+
+  // Avatar tones (deterministic per entity)
+  --tone-1: #3d5a99;
+  --tone-2: #2f7a68;
+  --tone-3: #8a5a2f;
+  --tone-4: #7a3f6b;
+  --tone-5: #42617d;
+  --tone-6: #5c4a99;
+  --tone-7: #6b6f2f;
+  --tone-8: #8a3f45;
+
+  // Typography
+  --font-sans: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  --text-2xs: 0.6875rem; // 11px
+  --text-xs: 0.75rem; // 12px
+  --text-sm: 0.8125rem; // 13px — base UI size
+  --text-md: 0.875rem; // 14px
+  --text-lg: 1rem; // 16px
+  --text-xl: 1.125rem; // 18px
+  --text-2xl: 1.375rem; // 22px
+  --text-3xl: 1.75rem; // 28px
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 680;
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --tracking-tight: -0.011em;
+  --tracking-caps: 0.06em;
+
+  // Spacing (4px grid)
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  // Radius
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 999px;
+
+  // Elevation
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 35%), 0 1px 3px rgb(0 0 0 / 30%);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 45%), 0 2px 8px rgb(0 0 0 / 30%);
+  --focus-ring: 0 0 0 2px var(--color-bg-app), 0 0 0 4px rgb(91 124 250 / 70%);
+
+  // Motion
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
+
+  // Layout
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 64px;
+  --topbar-height: 56px;
+  --content-max-width: 1480px;
+  --page-gutter: var(--space-8);
+
+  // Z-index scale
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+}
+
+@media (max-width: 1200px) {
+  :root {
+    --page-gutter: var(--space-6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}

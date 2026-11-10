@@ -1,0 +1,231 @@
+@use 'mixins' as *;
+
+:host {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  height: 100%;
+  background: var(--color-bg-sidebar);
+  border-right: 1px solid var(--color-border-subtle);
+  transition: width var(--duration-slow) var(--ease-standard);
+  overflow: hidden;
+}
+
+:host(.is-collapsed) {
+  width: var(--sidebar-width-collapsed);
+}
+
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--topbar-height);
+  padding: 0 var(--space-4) 0 18px;
+  flex-shrink: 0;
+}
+
+.sidebar__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: linear-gradient(140deg, var(--color-accent), #7a5cf0);
+  color: #fff;
+}
+
+.sidebar__brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.sidebar__product {
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.sidebar__edition {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+}
+
+.sidebar__nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-2) var(--space-3);
+}
+
+.sidebar__section-label {
+  @include caps-label;
+  height: 28px;
+  padding: var(--space-3) var(--space-2) 0;
+  white-space: nowrap;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.sidebar__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: var(--space-2);
+}
+
+.sidebar__link {
+  @include reset-button;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+
+  &:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+    color: var(--color-text-primary);
+    text-decoration: none;
+  }
+
+  &.is-active {
+    background: var(--color-surface-2);
+    color: var(--color-text-primary);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: -12px;
+      top: 8px;
+      bottom: 8px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--color-accent);
+    }
+
+    ui-icon {
+      color: var(--color-accent-text);
+    }
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.sidebar__label {
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.sidebar__badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  line-height: 18px;
+  text-align: center;
+}
+
+.sidebar__org {
+  display: flex;
+  width: 100%;
+}
+
+.sidebar__org-trigger {
+  height: 44px;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-surface-1);
+}
+
+.sidebar__org-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--tone-1);
+  color: #fff;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+
+  &--sm {
+    width: 20px;
+    height: 20px;
+    font-size: var(--text-2xs);
+  }
+}
+
+.sidebar__org-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.sidebar__org-meta {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-regular);
+}
+
+.sidebar__footer {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.sidebar__kbd {
+  margin-left: auto;
+}
+
+// Collapsed: hide labels but keep them in the accessibility tree via tooltips/aria-labels.
+:host(.is-collapsed) {
+  .sidebar__label,
+  .sidebar__brand-text,
+  .sidebar__badge {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sidebar__section-label {
+    opacity: 0;
+    height: 12px;
+    padding: 0;
+  }
+
+  .sidebar__badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 8px;
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    font-size: 0;
+    opacity: 1;
+    background: var(--color-warning);
+  }
+
+  .sidebar__org-trigger {
+    padding: 0 8px;
+  }
+}

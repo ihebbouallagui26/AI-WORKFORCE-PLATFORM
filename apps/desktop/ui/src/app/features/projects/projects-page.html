@@ -1,0 +1,74 @@
+<div class="page">
+  <ui-page-header heading="Projects" description="Simultaneous projects across departments, staffed by people and AI agents." />
+
+  <div class="toolbar" role="search" aria-label="Filter projects">
+    <ui-search-input class="search" placeholder="Search projects" label="Search projects" [(value)]="query" />
+    <select class="select select--sm filter" aria-label="Status" [value]="status() ?? ''" (change)="setStatus(statusSelect.value)" #statusSelect>
+      <option value="">All statuses</option>
+      @for (s of statusOptions; track s) {
+        <option [value]="s">{{ statuses[s].label }}</option>
+      }
+    </select>
+    <select class="select select--sm filter" aria-label="Category" [value]="category() ?? ''" (change)="setCategory(categorySelect.value)" #categorySelect>
+      <option value="">All categories</option>
+      @for (c of categoryOptions; track c) {
+        <option [value]="c">{{ categories[c] }}</option>
+      }
+    </select>
+    @if (filtersActive()) {
+      <button type="button" class="btn btn--ghost btn--sm" (click)="clear()"><ui-icon name="close" [size]="14" /> Clear</button>
+    }
+    <span class="toolbar__spacer"></span>
+    <span class="text-tertiary count">{{ filtered().length }} projects</span>
+  </div>
+
+  @if (store.loading()) {
+    <ui-skeleton [rows]="6" label="Loading projects" />
+  } @else if (store.error(); as error) {
+    <ui-empty-state icon="circle-alert" tone="danger" heading="Projects could not be loaded" [description]="error">
+      <button type="button" class="btn btn--secondary" (click)="store.reload()">Retry</button>
+    </ui-empty-state>
+  } @else {
+    <ul class="grid grid--cards projects">
+      @for (project of filtered(); track project.id) {
+        <li>
+          <a class="project" [routerLink]="['/projects', project.id]">
+            <div class="project__top">
+              <span class="project__code">{{ project.code }}</span>
+              <span class="chip">{{ categories[project.category] }}</span>
+              <ui-badge class="project__status" [presentation]="statuses[project.status]" />
+            </div>
+            <h2 class="project__name">{{ project.name }}</h2>
+            <p class="project__description">{{ project.description }}</p>
+
+            <div class="project__progress">
+              <div class="project__progress-head">
+                <span>Progress</span>
+                <span class="tabular">{{ store.progressOf(project.id).done }}/{{ store.progressOf(project.id).total }} tasks · {{ store.progressOf(project.id).percent }}%</span>
+              </div>
+              <ui-progress-bar [value]="store.progressOf(project.id).percent" [tone]="project.status === 'at-risk' ? 'warning' : project.status === 'completed' ? 'success' : 'accent'" [label]="project.name + ' progress'" />
+            </div>
+
+            <div class="project__footer">
+              <ui-member [ref]="project.managerRef" size="xs" />
+              <ui-avatar-stack [refs]="memberRefs(project)" [max]="4" />
+            </div>
+            <div class="project__dates">
+              <span><ui-icon name="calendar" [size]="13" /> {{ project.startDate | date: 'd MMM' }} → {{ project.dueDate | date: 'd MMM y' }}</span>
+              @if (isOverdue(project.dueDate, project.status)) {
+                <span class="overdue">Overdue</span>
+              }
+              @if (store.progressOf(project.id).blocked) {
+                <span class="blocked">{{ store.progressOf(project.id).blocked }} blocked</span>
+              }
+            </div>
+          </a>
+        </li>
+      } @empty {
+        <li class="projects__empty">
+          <ui-empty-state icon="projects" heading="No projects match" description="Adjust the filters to see more projects." />
+        </li>
+      }
+    </ul>
+  }
+</div>

@@ -1,0 +1,123 @@
+<div class="page">
+  <ui-page-header heading="AI Agents" description="AI employees with a professional identity, a role and supervised permissions. Their AI provider can change without changing who they are.">
+    <button type="button" class="btn btn--primary" (click)="formOpen.set(true)">
+      <ui-icon name="plus" [size]="15" /> Create agent
+    </button>
+  </ui-page-header>
+
+  <div class="toolbar filters" role="search" aria-label="Filter agents">
+    <ui-search-input class="filters__search" placeholder="Search name, role, skill, department" label="Search agents" [(value)]="query" />
+
+    <select class="select select--sm" aria-label="Department" [value]="departmentId() ?? ''" (change)="departmentId.set(toNullable(dept.value))" #dept>
+      <option value="">All departments</option>
+      @for (node of organization.departmentsFlat(); track node.department.id) {
+        <option [value]="node.department.id">{{ node.department.name }}</option>
+      }
+    </select>
+    <select class="select select--sm" aria-label="Role" [value]="roleId() ?? ''" (change)="roleId.set(toNullable(role.value))" #role>
+      <option value="">All roles</option>
+      @for (r of agentRoles(); track r.id) {
+        <option [value]="r.id">{{ r.title }}</option>
+      }
+    </select>
+    <select class="select select--sm" aria-label="Provider" [value]="providerId() ?? ''" (change)="providerId.set(toNullable(provider.value))" #provider>
+      <option value="">All providers</option>
+      @for (p of store.providers(); track p.id) {
+        <option [value]="p.id">{{ p.name }}</option>
+      }
+    </select>
+    <select class="select select--sm" aria-label="Status" [value]="statusFilter() ?? ''" (change)="setStatus(statusSelect.value)" #statusSelect>
+      <option value="">All statuses</option>
+      @for (s of statusOptions; track s) {
+        <option [value]="s">{{ statuses[s].label }}</option>
+      }
+    </select>
+    @if (filtersActive()) {
+      <button type="button" class="btn btn--ghost btn--sm" (click)="clearFilters()">
+        <ui-icon name="close" [size]="14" /> Clear
+      </button>
+    }
+
+    <span class="toolbar__spacer"></span>
+
+    <label class="sort">
+      <span class="text-tertiary">Sort</span>
+      <select class="select select--sm" [value]="sort()" (change)="setSort(sortSelect.value)" #sortSelect>
+        <option value="name">Name</option>
+        <option value="status">Status</option>
+        <option value="last-active">Last active</option>
+      </select>
+    </label>
+    <ui-segmented label="Layout" [options]="viewOptions" [(value)]="view" />
+  </div>
+
+  <p class="results-count" aria-live="polite">
+    {{ filtered().length }} of {{ store.agents().length }} agents
+  </p>
+
+  @if (store.loading()) {
+    <ui-skeleton [rows]="6" label="Loading agents" />
+  } @else if (store.error(); as error) {
+    <ui-empty-state icon="circle-alert" tone="danger" heading="Agents could not be loaded" [description]="error">
+      <button type="button" class="btn btn--secondary" (click)="store.reload()">Retry</button>
+    </ui-empty-state>
+  } @else if (filtered().length === 0) {
+    @if (filtersActive()) {
+      <ui-empty-state icon="search" heading="No agents match these filters" description="Try another search term or remove a filter.">
+        <button type="button" class="btn btn--secondary" (click)="clearFilters()">Clear filters</button>
+      </ui-empty-state>
+    } @else {
+      <ui-empty-state icon="agent" heading="No AI agents yet" description="Create your first AI employee and assign it to a department.">
+        <button type="button" class="btn btn--primary" (click)="formOpen.set(true)">Create agent</button>
+      </ui-empty-state>
+    }
+  } @else if (view() === 'grid') {
+    <ul class="grid grid--cards">
+      @for (agent of filtered(); track agent.id) {
+        <li><app-agent-card [agent]="agent" /></li>
+      }
+    </ul>
+  } @else {
+    <div class="table-wrap surface">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Agent</th>
+            <th scope="col">Department</th>
+            <th scope="col">Assigned project</th>
+            <th scope="col">Provider · Model</th>
+            <th scope="col">Status</th>
+            <th scope="col">Last active</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (agent of filtered(); track agent.id) {
+            <tr>
+              <td>
+                <a class="row-link" [routerLink]="['/agents', agent.id]">
+                  <ui-member [ref]="{ kind: 'agent', id: agent.id }" [showRole]="true" [showStatus]="true" [showAiTag]="false" />
+                </a>
+              </td>
+              <td>{{ profile(agent).departmentName }}</td>
+              <td>
+                @if (agent.assignedProjectIds[0] && projects.projectById().get(agent.assignedProjectIds[0]); as project) {
+                  {{ project.name }}
+                } @else {
+                  <span class="text-tertiary">Unassigned</span>
+                }
+              </td>
+              <td>
+                {{ store.primaryBinding(agent).provider?.name ?? '—' }}
+                <span class="text-tertiary">· {{ store.primaryBinding(agent).model?.name ?? '—' }}</span>
+              </td>
+              <td><ui-badge [presentation]="statuses[agent.status]" /></td>
+              <td class="tabular">{{ agent.lastActiveAt ? (agent.lastActiveAt | relativeTime) : 'Never' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>
+
+<app-agent-form-modal [open]="formOpen()" (closed)="closeForm()" (saved)="onSaved($event)" />

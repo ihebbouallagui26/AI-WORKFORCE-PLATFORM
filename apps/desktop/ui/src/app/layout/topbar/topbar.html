@@ -1,0 +1,104 @@
+<nav class="topbar__breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    @for (crumb of crumbs(); track $index; let last = $last) {
+      <li [class.is-current]="last">
+        @if (crumb.link && !last) {
+          <a [routerLink]="crumb.link">{{ crumb.label }}</a>
+        } @else {
+          <span [attr.aria-current]="last ? 'page' : null">{{ crumb.label }}</span>
+        }
+        @if (!last) {
+          <ui-icon class="topbar__crumb-sep" name="chevron-right" [size]="13" />
+        }
+      </li>
+    }
+  </ol>
+</nav>
+
+<div class="topbar__center">
+  <app-global-search />
+</div>
+
+<div class="topbar__actions">
+  @if (workspace.currentOrganization(); as organization) {
+    <a class="topbar__context" routerLink="/settings/organization" [attr.aria-label]="'Organization: ' + organization.name + ', ' + organization.deployment + ' deployment, mock data'">
+      <span class="topbar__context-dot" aria-hidden="true"></span>
+      <span class="topbar__context-name">{{ organization.name }}</span>
+      <span class="topbar__context-mode">{{ organization.deployment }}</span>
+      <span class="topbar__mock" title="All data in this build is mock data stored locally">Mock data</span>
+    </a>
+  }
+
+  <ui-dropdown align="end" #notifications="uiDropdown" [width]="360">
+    <button
+      type="button"
+      dropdownTrigger
+      class="btn btn--ghost btn--icon topbar__bell"
+      aria-haspopup="menu"
+      [attr.aria-expanded]="notifications.isOpen()"
+      [attr.aria-label]="'Notifications, ' + supervision.unreadActivityCount() + ' unread'"
+      (click)="notifications.toggle()"
+    >
+      <ui-icon name="bell" [size]="17" />
+      @if (supervision.unreadActivityCount() > 0) {
+        <span class="topbar__bell-dot" aria-hidden="true"></span>
+      }
+    </button>
+
+    <div class="notifications__header">
+      <span class="notifications__title">Notifications</span>
+      <button
+        type="button"
+        class="link-button"
+        [disabled]="supervision.unreadActivityCount() === 0"
+        (click)="markAllRead()"
+      >
+        Mark all as read
+      </button>
+    </div>
+    @for (event of recentActivity(); track event.id) {
+      <button type="button" class="menu-item notifications__item" [class.is-unread]="!event.read" (click)="openEvent(event)">
+        <span class="notifications__icon" [class]="'notifications__icon notifications__icon--' + activityPresentation[event.type].tone">
+          <ui-icon [name]="activityPresentation[event.type].icon" [size]="14" />
+        </span>
+        <span class="menu-item__body">
+          <span class="notifications__item-title">{{ event.title }}</span>
+          <span class="menu-item__meta truncate">{{ event.detail }}</span>
+        </span>
+        <span class="menu-item__meta notifications__time">{{ event.occurredAt | relativeTime }}</span>
+      </button>
+    } @empty {
+      <p class="notifications__empty">You are all caught up.</p>
+    }
+    <div class="menu-separator"></div>
+    <a class="menu-item" routerLink="/activity-center">
+      <ui-icon name="activity" [size]="15" />
+      Open Activity Center
+    </a>
+  </ui-dropdown>
+
+  <ui-dropdown align="end" #account="uiDropdown" [width]="240">
+    <button
+      type="button"
+      dropdownTrigger
+      class="topbar__account"
+      aria-haspopup="menu"
+      aria-label="Account menu"
+      [attr.aria-expanded]="account.isOpen()"
+      (click)="account.toggle()"
+    >
+      <ui-avatar size="sm" [name]="workspace.user()?.displayName ?? '?'" [tone]="workspace.user()?.avatarTone ?? 5" status="online" />
+    </button>
+    @if (workspace.user(); as user) {
+      <div class="account__header">
+        <span class="account__name">{{ user.displayName }}</span>
+        <span class="account__email">{{ user.email }}</span>
+      </div>
+    }
+    <div class="menu-separator"></div>
+    <a class="menu-item" routerLink="/profile"><ui-icon name="user" [size]="15" /> Profile</a>
+    <a class="menu-item" routerLink="/settings/general"><ui-icon name="settings" [size]="15" /> Settings</a>
+    <a class="menu-item" routerLink="/help" fragment="shortcuts"><ui-icon name="keyboard" [size]="15" /> Keyboard shortcuts</a>
+    <a class="menu-item" routerLink="/help"><ui-icon name="support" [size]="15" /> Help &amp; support</a>
+  </ui-dropdown>
+</div>

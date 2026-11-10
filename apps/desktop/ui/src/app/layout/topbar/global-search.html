@@ -1,0 +1,49 @@
+<div class="search" (focusout)="onFocusOut($event)">
+  <ui-icon class="search__icon" name="search" [size]="15" />
+  <input
+    #field
+    type="text"
+    class="input search__field"
+    placeholder="Search agents, people, projects, tasks"
+    role="combobox"
+    aria-label="Global search"
+    aria-autocomplete="list"
+    aria-controls="global-search-results"
+    [attr.aria-expanded]="showPanel()"
+    [attr.aria-activedescendant]="showPanel() && results().length ? 'gs-' + results()[activeIndex()].id : null"
+    [value]="query()"
+    (input)="onInput(field.value)"
+    (focus)="open.set(true)"
+    (keydown)="onKeydown($event)"
+  />
+  <kbd class="kbd search__kbd" aria-hidden="true">Ctrl K</kbd>
+
+  @if (showPanel()) {
+    <div class="search__panel" id="global-search-results" role="listbox" aria-label="Search results">
+      @for (result of results(); track result.id; let i = $index) {
+        @if (isFirstOfGroup(i)) {
+          <p class="menu-label" role="presentation">{{ result.group }}</p>
+        }
+        <button
+          type="button"
+          role="option"
+          tabindex="-1"
+          class="menu-item"
+          [id]="'gs-' + result.id"
+          [class.is-active]="i === activeIndex()"
+          [attr.aria-selected]="i === activeIndex()"
+          (mouseenter)="activeIndex.set(i)"
+          (click)="select(result)"
+        >
+          <ui-icon [name]="result.icon" [size]="15" />
+          <span class="menu-item__body">
+            <span class="truncate">{{ result.title }}</span>
+            <span class="menu-item__meta truncate">{{ result.meta }}</span>
+          </span>
+        </button>
+      } @empty {
+        <p class="search__empty">No results for “{{ query() }}”.</p>
+      }
+    </div>
+  }
+</div>

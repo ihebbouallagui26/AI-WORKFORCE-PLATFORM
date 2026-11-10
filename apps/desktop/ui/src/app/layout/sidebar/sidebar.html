@@ -1,0 +1,128 @@
+<div class="sidebar__brand">
+  <span class="sidebar__logo" aria-hidden="true">
+    <ui-icon name="sparkles" [size]="16" [strokeWidth]="2" />
+  </span>
+  <span class="sidebar__brand-text">
+    <span class="sidebar__product">AI Workforce</span>
+    <span class="sidebar__edition">Platform</span>
+  </span>
+</div>
+
+<nav class="sidebar__nav" aria-label="Main navigation">
+  <p class="sidebar__section-label">Main</p>
+  <ul class="sidebar__list">
+    @for (item of mainNavigation; track item.route) {
+      <li>
+        <a
+          class="sidebar__link"
+          [routerLink]="item.route"
+          routerLinkActive="is-active"
+          #rla="routerLinkActive"
+          [attr.aria-current]="rla.isActive ? 'page' : null"
+          [uiTooltip]="item.label"
+          uiTooltipPlacement="right"
+          [uiTooltipDisabled]="!layout.sidebarCollapsed()"
+        >
+          <ui-icon [name]="item.icon" [size]="17" />
+          <span class="sidebar__label">{{ item.label }}</span>
+          @if (badgeValue(item.badge); as count) {
+            <span class="sidebar__badge tabular" [attr.aria-label]="count + ' pending'">{{ count }}</span>
+          }
+        </a>
+      </li>
+    }
+  </ul>
+
+  <p class="sidebar__section-label">Workspace</p>
+  <ul class="sidebar__list">
+    <li>
+      <ui-dropdown class="sidebar__org" #orgMenu="uiDropdown" [width]="232">
+        <button
+          type="button"
+          dropdownTrigger
+          class="sidebar__link sidebar__org-trigger"
+          aria-haspopup="menu"
+          [attr.aria-expanded]="orgMenu.isOpen()"
+          [uiTooltip]="'Organization: ' + (workspace.currentOrganization()?.name ?? '')"
+          uiTooltipPlacement="right"
+          [uiTooltipDisabled]="!layout.sidebarCollapsed()"
+          (click)="orgMenu.toggle()"
+        >
+          <span class="sidebar__org-mark" aria-hidden="true">{{ workspace.currentOrganization()?.name?.charAt(0) ?? '·' }}</span>
+          <span class="sidebar__label sidebar__org-name">
+            <span class="truncate">{{ workspace.currentOrganization()?.name ?? 'Loading…' }}</span>
+            <span class="sidebar__org-meta">Switch organization</span>
+          </span>
+          <ui-icon class="sidebar__label" name="chevron-down" [size]="14" />
+        </button>
+        <p class="menu-label">Organizations</p>
+        @for (organization of workspace.organizations(); track organization.id) {
+          <button
+            type="button"
+            class="menu-item"
+            [class.is-selected]="organization.id === workspace.currentOrganizationId()"
+            (click)="switchOrganization(organization.id)"
+          >
+            <span class="sidebar__org-mark sidebar__org-mark--sm" aria-hidden="true">{{ organization.name.charAt(0) }}</span>
+            <span class="menu-item__body">
+              <span class="truncate">{{ organization.name }}</span>
+              <span class="menu-item__meta">{{ organization.industry }}</span>
+            </span>
+            @if (organization.id === workspace.currentOrganizationId()) {
+              <ui-icon class="menu-item__check" name="check" [size]="14" />
+            }
+          </button>
+        }
+      </ui-dropdown>
+    </li>
+    <li>
+      <a
+        class="sidebar__link"
+        [routerLink]="organizationSettingsRoute"
+        routerLinkActive="is-active"
+        [uiTooltip]="'Organization settings'"
+        uiTooltipPlacement="right"
+        [uiTooltipDisabled]="!layout.sidebarCollapsed()"
+      >
+        <ui-icon name="building" [size]="17" />
+        <span class="sidebar__label">Organization settings</span>
+      </a>
+    </li>
+  </ul>
+
+  <p class="sidebar__section-label">Preferences</p>
+  <ul class="sidebar__list">
+    @for (item of preferencesNavigation; track item.route) {
+      <li>
+        <a
+          class="sidebar__link"
+          [routerLink]="item.route"
+          routerLinkActive="is-active"
+          [uiTooltip]="item.label"
+          uiTooltipPlacement="right"
+          [uiTooltipDisabled]="!layout.sidebarCollapsed()"
+        >
+          <ui-icon [name]="item.icon" [size]="17" />
+          <span class="sidebar__label">{{ item.label }}</span>
+        </a>
+      </li>
+    }
+  </ul>
+</nav>
+
+<div class="sidebar__footer">
+  <button
+    type="button"
+    class="sidebar__link sidebar__collapse"
+    [disabled]="layout.isNarrow()"
+    [attr.aria-label]="layout.sidebarCollapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+    [uiTooltip]="layout.isNarrow() ? 'Window too narrow to expand' : 'Expand sidebar (Ctrl+B)'"
+    uiTooltipPlacement="right"
+    [uiTooltipDisabled]="!layout.sidebarCollapsed()"
+    (click)="layout.toggleSidebar()"
+  >
+    <ui-icon [name]="layout.sidebarCollapsed() ? 'sidebar-expand' : 'sidebar-collapse'" [size]="17" />
+    <span class="sidebar__label">Collapse</span>
+    <kbd class="kbd sidebar__label sidebar__kbd">Ctrl B</kbd>
+  </button>
+</div>

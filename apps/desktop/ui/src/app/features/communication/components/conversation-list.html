@@ -1,0 +1,43 @@
+<div class="list__search">
+  <ui-search-input placeholder="Search conversations" label="Search conversations" [(value)]="query" />
+</div>
+
+<nav class="list__body" aria-label="Conversations">
+  @for (group of groups(); track group.kind) {
+    <p class="caps-label list__group">{{ kinds[group.kind].label }}</p>
+    <ul>
+      @for (entry of group.entries; track entry.summary.conversation.id) {
+        <li>
+          <button
+            type="button"
+            class="item"
+            [class.is-active]="entry.summary.conversation.id === selectedId()"
+            [class.is-unread]="entry.summary.unread > 0"
+            [attr.aria-current]="entry.summary.conversation.id === selectedId() ? 'true' : null"
+            (click)="selected.emit(entry.summary.conversation.id)"
+          >
+            @if (entry.avatar; as avatar) {
+              <ui-avatar size="sm" [name]="avatar.name" [tone]="avatar.tone" [kind]="avatar.kind" [status]="avatar.status" />
+            } @else {
+              <span class="item__icon"><ui-icon [name]="kinds[entry.summary.conversation.kind].icon" [size]="14" /></span>
+            }
+            <span class="item__body">
+              <span class="item__top">
+                <span class="item__title">{{ entry.title }}</span>
+                @if (entry.summary.lastMessage) {
+                  <span class="item__time">{{ entry.summary.lastMessage.sentAt | relativeTime }}</span>
+                }
+              </span>
+              <span class="item__preview">{{ entry.preview }}</span>
+            </span>
+            @if (entry.summary.unread > 0) {
+              <span class="item__badge tabular" [attr.aria-label]="entry.summary.unread + ' unread'">{{ entry.summary.unread }}</span>
+            }
+          </button>
+        </li>
+      }
+    </ul>
+  } @empty {
+    <p class="list__empty">No conversations found.</p>
+  }
+</nav>

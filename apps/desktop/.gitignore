@@ -1,0 +1,4 @@
+node_modules/
+electron/dist/
+electron/.test-dist/
+release/

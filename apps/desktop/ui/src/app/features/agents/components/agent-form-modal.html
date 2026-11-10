@@ -1,0 +1,219 @@
+<ui-modal
+  size="lg"
+  [open]="open()"
+  [locked]="saving()"
+  [heading]="isEdit() ? 'Edit agent' : 'Create AI agent'"
+  description="Define a professional identity first. The AI provider is a separate, replaceable setting."
+  (closed)="close()"
+>
+  <form id="agent-form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <section class="form-section">
+      <h3 class="form-section__title">Professional identity</h3>
+      <p class="form-section__description">Who the agent is in the organization. Independent of any AI model.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="agent-name">Full name<span class="field__required" aria-hidden="true">*</span></label>
+          <input id="agent-name" class="input" formControlName="fullName" placeholder="e.g. Atlas" autocomplete="off" [attr.aria-invalid]="!!error('fullName', 'Full name')" aria-describedby="agent-name-error" />
+          @if (error('fullName', 'Full name'); as message) {
+            <span id="agent-name-error" class="field__error">{{ message }}</span>
+          }
+        </div>
+        <div class="field">
+          <label class="field__label" for="agent-department">Department<span class="field__required" aria-hidden="true">*</span></label>
+          <select id="agent-department" class="select" formControlName="departmentId" [attr.aria-invalid]="!!error('departmentId', 'Department')">
+            <option value="" disabled>Select a department</option>
+            @for (node of organization.departmentsFlat(); track node.department.id) {
+              <option [value]="node.department.id">{{ node.depth > 0 ? '— ' : '' }}{{ node.department.name }}</option>
+            }
+          </select>
+          @if (error('departmentId', 'Department'); as message) {
+            <span class="field__error">{{ message }}</span>
+          }
+        </div>
+        <div class="field field--full">
+          <label class="field__label" for="agent-role">Professional position<span class="field__required" aria-hidden="true">*</span></label>
+          <select id="agent-role" class="select" formControlName="roleId" [attr.aria-invalid]="!!error('roleId', 'Position')">
+            <option value="" disabled>{{ form.controls.departmentId.value ? 'Select a position' : 'Select a department first' }}</option>
+            @for (role of roles(); track role.id) {
+              <option [value]="role.id">{{ role.title }}</option>
+            }
+          </select>
+          @if (error('roleId', 'Position'); as message) {
+            <span class="field__error">{{ message }}</span>
+          }
+        </div>
+        <div class="field field--full">
+          <label class="field__label" for="agent-description">Role description<span class="field__required" aria-hidden="true">*</span></label>
+          <textarea id="agent-description" class="textarea" rows="3" formControlName="roleDescription" placeholder="What this agent does for the organization and how it collaborates with people."></textarea>
+          @if (error('roleDescription', 'Role description'); as message) {
+            <span class="field__error">{{ message }}</span>
+          }
+        </div>
+        <div class="field field--full">
+          <label class="field__label" for="agent-responsibilities">Responsibilities<span class="field__required" aria-hidden="true">*</span></label>
+          <ui-tag-input inputId="agent-responsibilities" formControlName="responsibilities" placeholder="Type a responsibility and press Enter" describedBy="agent-responsibilities-hint" />
+          @if (error('responsibilities', 'Responsibilities'); as message) {
+            <span class="field__error">{{ message }}</span>
+          } @else {
+            <span id="agent-responsibilities-hint" class="field__hint">Press Enter or comma to add each item.</span>
+          }
+        </div>
+        <div class="field field--full">
+          <label class="field__label" for="agent-skills">Skills<span class="field__required" aria-hidden="true">*</span></label>
+          <ui-tag-input inputId="agent-skills" formControlName="skills" placeholder="e.g. TypeScript, Copywriting, Forecasting" />
+          @if (error('skills', 'Skills'); as message) {
+            <span class="field__error">{{ message }}</span>
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <h3 class="form-section__title">AI provider</h3>
+      <p class="form-section__description">The engine behind the identity. It can be swapped later without changing who the agent is.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label class="field__label" for="agent-provider">Provider<span class="field__required" aria-hidden="true">*</span></label>
+          <select id="agent-provider" class="select" formControlName="providerId">
+            @for (provider of agentStore.providers(); track provider.id) {
+              <option [value]="provider.id">{{ provider.name }} ({{ connection[provider.connectionStatus].label }})</option>
+            }
+          </select>
+          @if (selectedProvider(); as provider) {
+            <span class="field__hint">{{ provider.description }} · {{ provider.deployment === 'local' ? 'Runs locally' : 'Cloud' }}</span>
+          }
+        </div>
+        <div class="field">
+          <label class="field__label" for="agent-model">Model<span class="field__required" aria-hidden="true">*</span></label>
+          <select id="agent-model" class="select" formControlName="modelId">
+            @for (model of models(); track model.id) {
+              <option [value]="model.id">{{ model.name }}</option>
+            }
+          </select>
+          @if (error('modelId', 'Model'); as message) {
+            <span class="field__error">{{ message }}</span>
+          }
+        </div>
+        <div class="field">
+          <label class="field__label" for="agent-fallback-provider">Fallback provider</label>
+          <select id="agent-fallback-provider" class="select" formControlName="fallbackProviderId">
+            <option value="">None</option>
+            @for (provider of agentStore.providers(); track provider.id) {
+              <option [value]="provider.id">{{ provider.name }}</option>
+            }
+          </select>
+        </div>
+        <div class="field">
+          <label class="field__label" for="agent-fallback-model">Fallback model</label>
+          <select id="agent-fallback-model" class="select" formControlName="fallbackModelId">
+            <option value="">None</option>
+            @for (model of fallbackModels(); track model.id) {
+              <option [value]="model.id">{{ model.name }}</option>
+            }
+          </select>
+          @if (form.hasError('fallbackModel') && submitted()) {
+            <span class="field__error">Select a model for the fallback provider.</span>
+          }
+        </div>
+      </div>
+      <p class="mock-notice">
+        <ui-icon name="lock" [size]="14" />
+        Provider credentials are configured on the platform backend. This desktop client never asks for, stores or transmits API keys.
+      </p>
+    </section>
+
+    <section class="form-section">
+      <h3 class="form-section__title">System instructions</h3>
+      <div class="field">
+        <label class="field__label" for="agent-instructions">Instructions given to the model<span class="field__required" aria-hidden="true">*</span></label>
+        <textarea id="agent-instructions" class="textarea mono" rows="5" formControlName="systemInstructions" placeholder="Describe tone, boundaries, escalation rules and quality standards."></textarea>
+        @if (error('systemInstructions', 'System instructions'); as message) {
+          <span class="field__error">{{ message }}</span>
+        } @else {
+          <span class="field__hint">{{ form.controls.systemInstructions.value.length }} / 4000 characters</span>
+        }
+      </div>
+    </section>
+
+    <section class="form-section">
+      <h3 class="form-section__title">Governance</h3>
+      <p class="form-section__description">Agents are supervised: sensitive operations always wait for a human decision.</p>
+
+      <fieldset class="options">
+        <legend class="field__label">Permission level</legend>
+        <div class="option-grid">
+          @for (level of permissionLevels; track level[0]) {
+            <label class="option" [class.is-selected]="form.controls.permissionLevel.value === level[0]">
+              <input type="radio" formControlName="permissionLevel" [value]="level[0]" />
+              <span class="option__title">{{ level[1].label }}</span>
+              <span class="option__description">{{ level[1].description }}</span>
+            </label>
+          }
+        </div>
+      </fieldset>
+
+      <fieldset class="options">
+        <legend class="field__label">Autonomy</legend>
+        <div class="option-grid option-grid--3">
+          @for (level of autonomyLevels; track level[0]) {
+            <label class="option" [class.is-selected]="form.controls.autonomyLevel.value === level[0]">
+              <input type="radio" formControlName="autonomyLevel" [value]="level[0]" />
+              <span class="option__title">{{ level[1].label }}</span>
+              <span class="option__description">{{ level[1].description }}</span>
+            </label>
+          }
+        </div>
+      </fieldset>
+
+      <fieldset class="options">
+        <legend class="field__label">Always require human approval for</legend>
+        <div class="checks">
+          @for (operation of operations; track operation[0]) {
+            <label class="checkbox">
+              <input #operationBox type="checkbox" [checked]="isOperationChecked(operation[0])" (change)="toggleOperation(operation[0], operationBox.checked)" />
+              {{ operation[1] }}
+            </label>
+          }
+        </div>
+      </fieldset>
+
+      <div class="field field--narrow">
+        <label class="field__label" for="agent-concurrency">Max concurrent tasks</label>
+        <input id="agent-concurrency" class="input" type="number" min="1" max="10" formControlName="maxConcurrentTasks" />
+        @if (error('maxConcurrentTasks', 'Max concurrent tasks'); as message) {
+          <span class="field__error">{{ message }}</span>
+        }
+      </div>
+    </section>
+
+    <section class="form-section">
+      <h3 class="form-section__title">Assigned projects</h3>
+      <div class="checks">
+        @for (project of projectStore.projects(); track project.id) {
+          <label class="checkbox">
+            <input #projectBox type="checkbox" [checked]="isProjectChecked(project.id)" (change)="toggleProject(project.id, projectBox.checked)" />
+            {{ project.name }} <span class="text-tertiary">{{ project.code }}</span>
+          </label>
+        } @empty {
+          <p class="text-tertiary">No projects in this organization yet.</p>
+        }
+      </div>
+    </section>
+  </form>
+
+  <ng-container modalFooter>
+    @if (submitted() && invalidCount() > 0) {
+      <span class="footer-error" role="alert">
+        <ui-icon name="circle-alert" [size]="14" />
+        {{ invalidCount() }} {{ invalidCount() === 1 ? 'field needs' : 'fields need' }} attention
+      </span>
+    }
+    <button type="button" class="btn btn--secondary" [disabled]="saving()" (click)="close()">Cancel</button>
+    <button type="submit" form="agent-form" class="btn btn--primary" [disabled]="saving()">
+      @if (saving()) {
+        <ui-icon class="is-spinning" name="loader" [size]="15" />
+      }
+      {{ isEdit() ? 'Save changes' : 'Create agent' }}
+    </button>
+  </ng-container>
+</ui-modal>
