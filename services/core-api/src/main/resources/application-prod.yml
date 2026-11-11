@@ -1,0 +1,20 @@
+# Production. All values come from the environment; nothing is defaulted here.
+logging:
+  structured:
+    format:
+      # One JSON document per line (Elastic Common Schema), ready for log aggregation.
+      console: ecs
+  level:
+    com.aiworkforce.core: INFO
+
+management:
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

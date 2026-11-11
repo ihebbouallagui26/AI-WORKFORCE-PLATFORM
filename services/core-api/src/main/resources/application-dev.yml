@@ -1,0 +1,28 @@
+# Local development. Activate with SPRING_PROFILES_ACTIVE=dev (./mvnw spring-boot:run does it).
+spring:
+  config:
+    # Local, Git-ignored environment files. Values from real environment variables take precedence.
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../../infra/docker/.env[.properties]
+
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
+management:
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.aiworkforce.core: DEBUG

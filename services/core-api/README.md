@@ -1,0 +1,135 @@
+# AI Workforce Platform — Core API
+
+Core backend of the AI Workforce Platform: a **Spring Boot modular monolith** on PostgreSQL.
+
+Sprint B0 delivers the foundation only:
+- configuration profiles, PostgreSQL connection and Flyway migrations;
+- a deny-by-default security policy and RFC 9457 error responses;
+- health checks, OpenAPI documentation, request correlation;
+- unit, web, integration (Testcontainers) and architecture tests.
+
+There are **no business endpoints and no authentication yet**: every endpoint except health returns `401`. Authentication, authorization and multi-tenancy are Sprint B1.
+
+Architecture: [`docs/architecture/CORE_BACKEND_ARCHITECTURE.md`](../../docs/architecture/CORE_BACKEND_ARCHITECTURE.md) · Security: [`docs/architecture/SECURITY_ARCHITECTURE.md`](../../docs/architecture/SECURITY_ARCHITECTURE.md) · Decisions: [`docs/adr`](../../docs/adr)
+
+## Technology stack
+
+| Component | Version | Notes |
+| --- | --- | --- |
+| Java | 21 (LTS) | Eclipse Temurin |
+| Spring Boot | 4.1.2 | Manages every version below unless noted |
+| Spring Framework / Security | 7.0.10 / 7.1.2 | |
+| Hibernate ORM | 7.4.13 | `ddl-auto=validate` only |
+| Flyway | 12.4.0 | `flyway-database-postgresql` module |
+| PostgreSQL JDBC | 42.7.14 | |
+| Jackson | 3.1.7 | Spring Boot 4 uses Jackson 3 (`tools.jackson`) |
+| springdoc-openapi | 3.2.0 | Not in the Boot BOM; built against Boot 4.1.2 |
+| JUnit / Testcontainers / ArchUnit | 6.0.3 / 2.0.5 / 1.5.1 | |
+| Maven | 3.9.11 | Pinned by the Maven Wrapper |
+| PostgreSQL | 18 + pgvector 0.8.7 | `pgvector/pgvector:0.8.7-pg18` |
+
+Version choices are recorded in [ADR-0002](../../docs/adr/ADR-0002-spring-boot-4-java-21.md).
+
+## Prerequisites
+
+- JDK 21 (`java -version`)
+- Docker Desktop or Docker Engine (database, integration tests, container image)
+- Maven is **not** required: use `./mvnw` (Linux/macOS/Git Bash) or `mvnw.cmd` (Windows)
+
+## Local setup
+
+```bash
+# 1. Environment (once). Set DB_PASSWORD to a long random value.
+cp infra/docker/.env.example infra/docker/.env
+
+# 2. Start PostgreSQL (from the repository root)
+docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d postgres
+
+# 3. Run the API with the dev profile (from services/core-api)
+cd services/core-api
+./mvnw spring-boot:run
+```
+
+The `dev` profile reads `infra/docker/.env` (and an optional `services/core-api/.env`), so the same credentials serve Docker Compose and the API. Real environment variables always take precedence.
+
+> **Port 8080 already in use?** Some machines run another service on 8080 (for example Oracle XML DB / TNS Listener). Set `SERVER_PORT=8081` in `infra/docker/.env`; the desktop app's `apiBaseUrl` must then use the same port.
+
+### Environment variables
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `SPRING_PROFILES_ACTIVE` | no | none (production-safe base) | `dev`, `test` or `prod`. `spring-boot:run` uses `dev`. |
+| `SERVER_PORT` | no | `8080` | HTTP port |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` | no | `localhost` / `5432` / `ai_workforce` | PostgreSQL location |
+| `DB_USERNAME` / `DB_PASSWORD` | **yes** | none | Database credentials. The app does not start without them. |
+| `APP_CORS_ALLOWED_ORIGINS` | **yes** outside `dev` | `http://localhost:4200` in `dev` only | Comma-separated exact origins. Wildcards are rejected at startup. |
+
+Secrets are never committed: `.env` files are ignored by Git, and only `*.env.example` files with placeholders are versioned.
+
+## Database and migrations
+
+- The schema is owned by **Flyway**: `src/main/resources/db/migration/V<n>__<description>.sql`. Migrations run automatically at startup, before Hibernate validates the schema (`ddl-auto=validate`).
+- `V1__enable_extensions.sql` enables `pgvector`. No business tables exist yet.
+- Applied migrations are immutable. A fix is a new migration, and `flyway clean` is disabled.
+- Conventions: [`docs/database/DATABASE_CONVENTIONS.md`](../../docs/database/DATABASE_CONVENTIONS.md).
+
+```bash
+# Inspect the database
+docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec postgres \
+  psql -U app_user -d ai_workforce -c "select version, description, success from flyway_schema_history"
+```
+
+## API
+
+| Endpoint | Access | Description |
+| --- | --- | --- |
+| `GET /api/v1/health` | public | Application status (`UP` → 200, otherwise 503), version, UTC timestamp |
+| `GET /actuator/health` (`/liveness`, `/readiness`) | public | Operational probes. Details are shown only in `dev`. |
+| `GET /actuator/info` | public | Build information |
+| `/v3/api-docs`, `/swagger-ui.html` | public in `dev` only | OpenAPI document and Swagger UI |
+| everything else | authenticated | `401` until Sprint B1 |
+
+- **Swagger UI (dev):** `http://localhost:8080/swagger-ui.html`. The OpenAPI JSON is at `/v3/api-docs`.
+- **Published contract:** [`contracts/openapi/core-api.v1.json`](../../contracts/openapi/core-api.v1.json). It is regenerated by the test suite into `target/openapi/core-api.v1.json`.
+- **Errors:** `application/problem+json` (RFC 9457) with `type` (`urn:aiworkforce:problem:*`), `title`, `status`, `detail`, `instance`, `timestamp` and `requestId`. Validation errors add `errors[{field, message}]`.
+- **Correlation:** send `X-Request-Id` (8–64 characters among `[A-Za-z0-9-]`), or one is generated. It is echoed in the response, in errors, and in every log line.
+
+## Tests
+
+```bash
+./mvnw clean test       # 63 tests: unit, web/security, architecture, PostgreSQL integration
+./mvnw clean package    # tests + executable jar in target/
+./mvnw dependency:analyze
+```
+
+The integration tests start `pgvector/pgvector:0.8.7-pg18` with Testcontainers. Without Docker they are **skipped**, not failed, and Maven reports them as skipped.
+
+## Docker
+
+```bash
+# Build and run API + database (from the repository root)
+docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile app up -d --build
+
+# Stop (data is kept in the ai-workforce-postgres-data volume)
+docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile app down
+```
+
+The image is a multi-stage build:
+- a JDK stage packages the jar;
+- a JRE runtime stage runs it with the Spring Boot layered layout, as the unprivileged user `app` (uid 10001).
+
+Migrations run inside the application at startup, never from an entrypoint script. Containers start without a profile (production-safe) unless `SPRING_PROFILES_ACTIVE` is set; compose uses `dev` by default.
+
+## Package layout
+
+```
+com.aiworkforce.core
+├── CoreApiApplication
+├── config/        AppProperties, SecurityConfig, CorsConfig, OpenApiConfig, TimeConfig
+├── common/
+│   ├── exception/ GlobalExceptionHandler, ProblemType, ResourceNotFoundException
+│   └── logging/   RequestIdFilter
+└── health/        HealthController, ApplicationHealthService, HealthResponse
+```
+
+Future business modules (`organization`, `agent`, `project`…) are sibling packages, following the rules in the architecture document and enforced by `ArchitectureTest`.
