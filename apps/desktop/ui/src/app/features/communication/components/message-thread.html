@@ -1,0 +1,37 @@
+<div #scroller class="thread" role="log" aria-live="polite" aria-label="Messages">
+  @for (section of sections(); track section.day) {
+    <div class="day" role="separator">
+      <span>{{ dayLabel(section.day) }}</span>
+    </div>
+    @for (group of section.groups; track group.key) {
+      <article class="group" [class.group--agent]="group.author.kind === 'agent'" [class.group--mine]="group.mine">
+        <ui-avatar size="md" [name]="group.author.name" [tone]="group.author.tone" [kind]="group.author.kind" />
+        <div class="group__body">
+          <header class="group__header">
+            <span class="group__author">{{ group.mine ? 'You' : group.author.name }}</span>
+            @if (group.author.kind === 'agent') {
+              <span class="group__ai"><ui-icon name="agent" [size]="11" /> AI agent</span>
+            }
+            <span class="group__role">{{ group.author.roleTitle }}</span>
+            <time class="group__time" [attr.datetime]="group.messages[0].sentAt">{{ group.messages[0].sentAt | date: 'HH:mm' }}</time>
+          </header>
+          @for (message of group.messages; track message.id) {
+            <div class="message">
+              <p class="message__text">{{ message.body }}</p>
+              @if (message.delivery === 'local') {
+                <span class="message__local" uiTooltip="Stored in this session only. Not transmitted: realtime messaging is not connected yet.">
+                  <ui-icon name="lock" [size]="11" /> Local only
+                </span>
+              }
+            </div>
+          }
+        </div>
+      </article>
+    }
+  } @empty {
+    <div class="thread__empty">
+      <ui-icon name="messages" [size]="22" />
+      <p>No messages yet. Start the conversation below.</p>
+    </div>
+  }
+</div>

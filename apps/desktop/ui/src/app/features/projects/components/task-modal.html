@@ -1,0 +1,80 @@
+<ui-modal
+  [open]="open()"
+  [locked]="saving()"
+  [heading]="isEdit() ? (task()?.key + ' · Task details') : 'New task'"
+  [description]="project().name"
+  (closed)="close()"
+>
+  @if (task(); as t) {
+    <div class="task-meta">
+      <span>Reported by <ui-member [ref]="t.reporterRef" size="xs" /></span>
+      <span><ui-icon name="clock" [size]="13" /> Created {{ t.createdAt | date: 'd MMM, HH:mm' }}</span>
+      <span>Updated {{ t.updatedAt | date: 'd MMM, HH:mm' }}</span>
+    </div>
+  }
+
+  <form id="task-form" class="form-grid" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    <div class="field field--full">
+      <label class="field__label" for="task-title">Title<span class="field__required" aria-hidden="true">*</span></label>
+      <input id="task-title" class="input" formControlName="title" placeholder="What needs to be done?" autocomplete="off" />
+      @if (error('title', 'Title'); as message) {
+        <span class="field__error">{{ message }}</span>
+      }
+    </div>
+    <div class="field field--full">
+      <label class="field__label" for="task-description">Description</label>
+      <textarea id="task-description" class="textarea" rows="4" formControlName="description" placeholder="Context, acceptance criteria, links"></textarea>
+    </div>
+    <div class="field">
+      <label class="field__label" for="task-status">Status</label>
+      <select id="task-status" class="select" formControlName="status">
+        @for (s of statusOrder; track s) {
+          <option [value]="s">{{ statuses[s].label }}</option>
+        }
+      </select>
+    </div>
+    <div class="field">
+      <label class="field__label" for="task-priority">Priority</label>
+      <select id="task-priority" class="select" formControlName="priority">
+        @for (p of priorities; track p[0]) {
+          <option [value]="p[0]">{{ p[1].label }}</option>
+        }
+      </select>
+    </div>
+    <div class="field">
+      <label class="field__label" for="task-assignee">Assignee</label>
+      <select id="task-assignee" class="select" formControlName="assigneeKey">
+        <option value="">Unassigned</option>
+        <optgroup label="Project team">
+          @for (m of assigneeGroups().project; track m.key) {
+            <option [value]="m.key">{{ m.name }}{{ m.kind === 'agent' ? ' (AI)' : '' }} — {{ m.roleTitle }}</option>
+          }
+        </optgroup>
+        <optgroup label="Rest of the organization">
+          @for (m of assigneeGroups().others; track m.key) {
+            <option [value]="m.key">{{ m.name }}{{ m.kind === 'agent' ? ' (AI)' : '' }} — {{ m.roleTitle }}</option>
+          }
+        </optgroup>
+      </select>
+      <span class="field__hint">Assigning an AI agent records the assignment only; no agent starts working in this phase.</span>
+    </div>
+    <div class="field">
+      <label class="field__label" for="task-due">Due date</label>
+      <input id="task-due" class="input" type="date" formControlName="dueDate" />
+    </div>
+    <div class="field field--full">
+      <label class="field__label" for="task-labels">Labels</label>
+      <ui-tag-input inputId="task-labels" formControlName="labels" placeholder="e.g. frontend, billing" />
+    </div>
+  </form>
+
+  <ng-container modalFooter>
+    <button type="button" class="btn btn--secondary" [disabled]="saving()" (click)="close()">Cancel</button>
+    <button type="submit" form="task-form" class="btn btn--primary" [disabled]="saving()">
+      @if (saving()) {
+        <ui-icon class="is-spinning" name="loader" [size]="15" />
+      }
+      {{ isEdit() ? 'Save changes' : 'Create task' }}
+    </button>
+  </ng-container>
+</ui-modal>

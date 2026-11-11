@@ -1,0 +1,61 @@
+<div class="messenger" [class.messenger--details]="showDetails() && !!active()">
+  <aside class="messenger__list" aria-label="Conversation list">
+    @if (store.loading() && !store.summaries().length) {
+      <ui-skeleton [rows]="8" label="Loading conversations" />
+    } @else {
+      <app-conversation-list [summaries]="store.summaries()" [selectedId]="activeId()" (selected)="select($event)" />
+    }
+  </aside>
+
+  <section class="messenger__main" aria-label="Conversation">
+    @if (store.error(); as error) {
+      <ui-empty-state icon="circle-alert" tone="danger" heading="Messages could not be loaded" [description]="error" />
+    } @else if (active(); as conversation) {
+      <header class="conversation__header">
+        <div class="conversation__titles">
+          <h1 class="conversation__title">{{ title() }}</h1>
+          <p class="conversation__topic">{{ conversation.topic || conversation.participantRefs.length + ' participants' }}</p>
+        </div>
+        <ui-avatar-stack [refs]="conversation.participantRefs" [max]="5" />
+        <div class="conversation__actions">
+          <button type="button" class="btn btn--ghost btn--icon" aria-disabled="true" aria-label="Voice call (coming soon)" uiTooltip="Voice calls — planned for a later phase" uiTooltipPlacement="bottom">
+            <ui-icon name="phone" [size]="16" />
+          </button>
+          <button type="button" class="btn btn--ghost btn--icon" aria-disabled="true" aria-label="Video call (coming soon)" uiTooltip="Video calls — planned for a later phase" uiTooltipPlacement="bottom">
+            <ui-icon name="video" [size]="16" />
+          </button>
+          <button
+            type="button"
+            class="btn btn--ghost btn--icon"
+            [class.is-active]="showDetails()"
+            [attr.aria-pressed]="showDetails()"
+            aria-label="Toggle conversation details"
+            uiTooltip="Details"
+            uiTooltipPlacement="bottom"
+            (click)="showDetails.set(!showDetails())"
+          >
+            <ui-icon name="info" [size]="16" />
+          </button>
+        </div>
+      </header>
+
+      @if (includesAgents()) {
+        <p class="mock-notice conversation__notice" role="note">
+          <ui-icon name="info" [size]="14" />
+          AI agents in this conversation will not reply yet: the orchestration engine is not connected in this phase. Messages you send are stored locally.
+        </p>
+      }
+
+      <app-message-thread [messages]="messages()" />
+      <app-message-composer [recipient]="title()" [sending]="sending()" (send)="send($event)" />
+    } @else {
+      <ui-empty-state icon="messages" heading="No conversation selected" description="Choose a conversation from the list." />
+    }
+  </section>
+
+  @if (showDetails() && active(); as conversation) {
+    <aside class="messenger__details" aria-label="Conversation details">
+      <app-conversation-details [conversation]="conversation" />
+    </aside>
+  }
+</div>

@@ -1,0 +1,157 @@
+<div class="page">
+  <a class="back-link" routerLink="/projects"><ui-icon name="arrow-left" [size]="14" /> All projects</a>
+
+  @if (store.loading() && !project()) {
+    <ui-skeleton [rows]="6" label="Loading project" />
+  } @else if (project(); as project) {
+    <header class="project-header">
+      <div class="project-header__main">
+        <div class="project-header__eyebrow">
+          <span class="mono">{{ project.code }}</span>
+          <span class="chip">{{ categories[project.category] }}</span>
+          <ui-badge [presentation]="projectStatus[project.status]" />
+        </div>
+        <h1 class="project-header__title">{{ project.name }}</h1>
+        <p class="project-header__description">{{ project.description }}</p>
+      </div>
+      <button type="button" class="btn btn--primary" (click)="newTask()"><ui-icon name="plus" [size]="15" /> New task</button>
+    </header>
+
+    <section class="summary" aria-label="Project summary">
+      <div class="summary__item summary__item--wide">
+        <span class="summary__label">Progress</span>
+        <div class="summary__progress">
+          <ui-progress-bar [value]="progress().percent" [tone]="project.status === 'at-risk' ? 'warning' : 'accent'" label="Project progress" />
+          <span class="tabular">{{ progress().percent }}%</span>
+        </div>
+        <span class="summary__hint tabular">{{ progress().done }} of {{ progress().total }} tasks done · {{ progress().blocked }} blocked</span>
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">Project manager</span>
+        <ui-member [ref]="project.managerRef" [showRole]="true" />
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">Team</span>
+        <span class="summary__value tabular">{{ memberCounts().humans }} people · {{ memberCounts().agents }} AI agents</span>
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">Start</span>
+        <span class="summary__value">{{ project.startDate | date: 'd MMM y' }}</span>
+      </div>
+      <div class="summary__item">
+        <span class="summary__label">Due</span>
+        <span class="summary__value">{{ project.dueDate | date: 'd MMM y' }} <span class="text-tertiary">({{ project.dueDate | relativeTime }})</span></span>
+      </div>
+    </section>
+
+    <ui-tabs label="Project views" [items]="tabs()" [active]="activeTab()" (activeChange)="selectTab($event)" />
+
+    <div role="tabpanel" class="stack">
+      @switch (activeTab()) {
+        @case ('board') {
+          <div class="toolbar">
+            <ui-search-input class="task-search" placeholder="Filter tasks" label="Filter tasks" [(value)]="query" />
+            <ui-segmented label="Assignee type" [options]="assigneeOptions" [(value)]="assignee" />
+            <span class="toolbar__spacer"></span>
+            <span class="text-tertiary hint"><ui-icon name="grip" [size]="13" /> Drag cards between columns, or use the card menu.</span>
+          </div>
+          <app-kanban-board [tasks]="filteredTasks()" (openTask)="openTask($event)" (addTask)="newTask($event)" />
+        }
+        @case ('list') {
+          <div class="toolbar">
+            <ui-search-input class="task-search" placeholder="Filter tasks" label="Filter tasks" [(value)]="query" />
+            <ui-segmented label="Assignee type" [options]="assigneeOptions" [(value)]="assignee" />
+          </div>
+          <ui-panel [flush]="true">
+            <app-task-table [tasks]="filteredTasks()" (openTask)="openTask($event)" />
+          </ui-panel>
+        }
+        @case ('members') {
+          <ui-panel heading="Assigned team" subheading="People and AI agents working on this project" [flush]="true">
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Member</th>
+                    <th scope="col">Project role</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Allocation</th>
+                    <th scope="col">Open tasks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (member of project.members; track member.member.kind + member.member.id; let i = $index) {
+                    <tr>
+                      <td>
+                        @if (member.member.kind === 'agent') {
+                          <a [routerLink]="['/agents', member.member.id]" class="member-link"><ui-member [ref]="member.member" [showRole]="true" [showStatus]="true" /></a>
+                        } @else {
+                          <a routerLink="/organization" [queryParams]="{ member: member.member.id }" class="member-link"><ui-member [ref]="member.member" [showRole]="true" [showStatus]="true" /></a>
+                        }
+                      </td>
+                      <td>{{ member.projectRole }}</td>
+                      <td>
+                        @if (member.member.kind === 'agent') {
+                          <span class="chip chip--ai">AI agent</span>
+                        } @else {
+                          <span class="chip">Human</span>
+                        }
+                      </td>
+                      <td class="allocation">
+                        <ui-progress-bar [value]="member.allocation" tone="neutral" [label]="'Allocation ' + member.allocation + '%'" />
+                        <span class="tabular">{{ member.allocation }}%</span>
+                      </td>
+                      <td class="tabular">{{ tasksAssignedTo(i) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </ui-panel>
+        }
+        @case ('activity') {
+          <div class="grid grid--halves">
+            <ui-panel heading="Project activity" [flush]="true">
+              @if (activity().length) {
+                <ui-activity-list [events]="activity()" />
+              } @else {
+                <ui-empty-state [compact]="true" icon="activity" heading="No activity yet" />
+              }
+            </ui-panel>
+            <ui-panel heading="Agent executions" subheading="Mock records from the orchestration engine" [flush]="true">
+              <ul>
+                @for (execution of executions(); track execution.id) {
+                  <li class="list-row">
+                    <ui-member [ref]="{ kind: 'agent', id: execution.agentId }" [avatarOnly]="true" />
+                    <span class="list-row__body">
+                      <span class="list-row__title">{{ execution.title }}</span>
+                      <span class="list-row__meta">{{ execution.resultSummary }}</span>
+                    </span>
+                    <span class="list-row__aside">
+                      <ui-badge [presentation]="executionStatus[execution.status]" />
+                      <span class="exec-duration tabular">{{ execution.startedAt | duration: execution.finishedAt }}</span>
+                    </span>
+                  </li>
+                } @empty {
+                  <ui-empty-state [compact]="true" icon="cpu" heading="No executions recorded" />
+                }
+              </ul>
+            </ui-panel>
+          </div>
+        }
+      }
+    </div>
+
+    <app-task-modal
+      [open]="taskModalOpen()"
+      [project]="project"
+      [task]="selectedTask()"
+      [defaultStatus]="creatingStatus() ?? 'todo'"
+      (closed)="closeTaskModal()"
+    />
+  } @else {
+    <ui-empty-state icon="projects" heading="Project not found" description="This project does not exist in the current organization.">
+      <a class="btn btn--secondary" routerLink="/projects">Back to projects</a>
+    </ui-empty-state>
+  }
+</div>

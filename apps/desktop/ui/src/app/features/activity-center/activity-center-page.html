@@ -1,0 +1,103 @@
+<div class="page">
+  <ui-page-header
+    heading="Activity Center"
+    description="Supervise what AI agents are doing. Agents are paused on sensitive operations until a person approves or rejects them."
+  />
+
+  <section class="grid summary" aria-label="Supervision summary">
+    <ui-stat-card label="Awaiting your decision" icon="shield-alert" tone="warning" [value]="summary().pending" [caption]="summary().critical + ' high or critical risk'" />
+    <ui-stat-card label="Running or queued" icon="loader" tone="accent" [value]="summary().running" caption="Agent executions in progress" />
+    <ui-stat-card label="Failed in last 24 h" icon="circle-x" tone="danger" [value]="summary().failed" caption="Need human investigation" />
+    <ui-stat-card label="Agents needing attention" icon="agent" tone="ai" [value]="summary().attention" caption="Error or blocked on approval" />
+  </section>
+
+  <ui-tabs label="Activity Center sections" [items]="tabs()" [active]="activeTab()" (activeChange)="selectTab($event)" />
+
+  <div role="tabpanel">
+    @if (store.loading()) {
+      <ui-skeleton [rows]="6" label="Loading supervision data" />
+    } @else if (store.error(); as error) {
+      <ui-empty-state icon="circle-alert" tone="danger" heading="Supervision data could not be loaded" [description]="error">
+        <button type="button" class="btn btn--secondary" (click)="store.reload()">Retry</button>
+      </ui-empty-state>
+    } @else {
+      @switch (activeTab()) {
+        @case ('approvals') {
+          <div class="grid grid--main">
+            <div class="stack">
+              <div class="toolbar">
+                <h2 class="section-title">Pending approvals</h2>
+                <span class="toolbar__spacer"></span>
+                <select class="select select--sm risk-filter" aria-label="Filter by risk" [value]="riskFilter() ?? ''" (change)="setRisk(riskSelect.value)" #riskSelect>
+                  <option value="">All risk levels</option>
+                  @for (risk of riskOptions; track risk) {
+                    <option [value]="risk">{{ risks[risk].label }}</option>
+                  }
+                </select>
+              </div>
+              @for (approval of pending(); track approval.id) {
+                <app-approval-card
+                  [approval]="approval"
+                  [busy]="deciding() === approval.id"
+                  [focused]="focus() === approval.id"
+                  (approve)="approve($event)"
+                  (reject)="reject($event)"
+                />
+              } @empty {
+                <ui-panel>
+                  <ui-empty-state icon="shield-check" heading="No pending approvals" description="Agents have nothing waiting for a human decision." />
+                </ui-panel>
+              }
+            </div>
+            <div class="stack">
+              <ui-panel heading="How supervision works">
+                <ol class="steps">
+                  <li><span class="steps__index">1</span> An agent reaches an operation listed in its approval policy.</li>
+                  <li><span class="steps__index">2</span> The execution pauses and a request appears here with its risk level.</li>
+                  <li><span class="steps__index">3</span> You approve or reject it, with an optional note kept in the audit trail.</li>
+                </ol>
+                <p class="mock-notice steps__notice">
+                  <ui-icon name="info" [size]="14" />
+                  In this phase decisions are recorded in the local mock workspace only. No agent receives them yet.
+                </p>
+              </ui-panel>
+              <ui-panel heading="Recent decisions" [flush]="true">
+                <div class="decisions">
+                  @for (approval of store.decidedApprovals(); track approval.id) {
+                    <app-approval-card [approval]="approval" />
+                  } @empty {
+                    <ui-empty-state [compact]="true" icon="inbox" heading="No decisions yet" />
+                  }
+                </div>
+              </ui-panel>
+            </div>
+          </div>
+        }
+        @case ('feed') {
+          <ui-panel heading="Activity feed" subheading="Everything agents and people did recently" [flush]="true">
+            <button panelActions type="button" class="btn btn--secondary btn--sm" [disabled]="store.unreadActivityCount() === 0" (click)="markAllRead()">
+              <ui-icon name="check" [size]="14" /> Mark all as read
+            </button>
+            <div class="event-filters" role="group" aria-label="Filter by event type">
+              @for (type of eventTypes; track type) {
+                <button type="button" class="chip event-chip" [class.chip--accent]="eventFilter() === type" [attr.aria-pressed]="eventFilter() === type" (click)="toggleEventFilter(type)">
+                  <ui-icon [name]="eventPresentation[type].icon" [size]="12" /> {{ eventPresentation[type].label }}
+                </button>
+              }
+            </div>
+            @if (feed().length) {
+              <ui-activity-list [events]="feed()" />
+            } @else {
+              <ui-empty-state [compact]="true" icon="activity" heading="No events of this type" />
+            }
+          </ui-panel>
+        }
+        @case ('executions') {
+          <ui-panel [flush]="true">
+            <app-execution-table [executions]="store.executions()" />
+          </ui-panel>
+        }
+      }
+    }
+  </div>
+</div>

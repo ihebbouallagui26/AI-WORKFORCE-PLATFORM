@@ -1,0 +1,83 @@
+{
+  "name": "ai-workforce-desktop",
+  "productName": "AI Workforce Platform",
+  "version": "0.1.0",
+  "description": "Desktop control center for the AI Workforce Platform (Phase A).",
+  "private": true,
+  "author": "AI Workforce Platform",
+  "main": "electron/dist/main.js",
+  "scripts": {
+    "ui:install": "npm --prefix ui install",
+    "ui:start": "npm --prefix ui start",
+    "ui:build": "npm --prefix ui run build",
+    "ui:test": "npm --prefix ui test -- --watch=false",
+    "electron:clean": "node -e \"require('node:fs').rmSync('electron/dist',{recursive:true,force:true})\"",
+    "electron:build": "npm run electron:clean && tsc -p electron/tsconfig.json",
+    "electron:test": "tsc -p electron/tsconfig.test.json && node --test \"electron/.test-dist/test/**/*.test.js\"",
+    "test": "npm run electron:test && npm run ui:test",
+    "electron:start": "npm run electron:build && node scripts/launch-electron.cjs --dev-server-url=http://localhost:4200",
+    "dev": "concurrently -k -n ui,electron -c blue,magenta \"npm run ui:start\" \"wait-on http-get://localhost:4200 && npm run electron:start\"",
+    "start": "npm run ui:build && npm run electron:build && node scripts/launch-electron.cjs",
+    "start:built": "node scripts/launch-electron.cjs",
+    "build": "npm run ui:build && npm run electron:build",
+    "package": "npm run build && electron-builder --publish never",
+    "package:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "build": {
+    "appId": "com.aiworkforce.desktop",
+    "productName": "AI Workforce Platform",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "electron/dist/**/*.js",
+      {
+        "from": "ui/dist/ui/browser",
+        "to": "renderer",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "concurrently": "^10.0.7",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "~6.0.2",
+    "wait-on": "^9.5.1"
+  }
+}

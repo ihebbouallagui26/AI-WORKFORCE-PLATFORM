@@ -1,0 +1,157 @@
+// Shared page layout primitives used by every feature page.
+@use 'mixins' as *;
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--space-6) var(--page-gutter) var(--space-10);
+
+  &--fill {
+    height: 100%;
+    max-width: none;
+    padding-bottom: var(--space-6);
+    min-height: 0;
+  }
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+
+  &__spacer {
+    flex: 1;
+  }
+}
+
+.grid {
+  display: grid;
+  gap: var(--space-4);
+
+  &--stats {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+
+    @media (max-width: 1280px) {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    @media (max-width: 900px) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  &--main {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+    align-items: start;
+
+    @media (max-width: 1180px) {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  &--halves {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    @media (max-width: 1000px) {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  &--cards {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  // Rows rendered as <a> or <button>: neutralise native styles but keep the row padding.
+  &--interactive {
+    width: 100%;
+    margin: 0;
+    border-width: 0 0 1px;
+    border-style: solid;
+    border-color: var(--color-border-subtle);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: none;
+    }
+    transition: background-color var(--duration-fast) var(--ease-standard);
+
+    &:hover {
+      background: var(--color-surface-hover);
+    }
+  }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    @include truncate;
+    color: var(--color-text-primary);
+    font-weight: var(--weight-medium);
+  }
+
+  &__meta {
+    @include truncate;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+  }
+
+  &__aside {
+    flex-shrink: 0;
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+  }
+}
+
+.meta-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+
+  dt {
+    color: var(--color-text-tertiary);
+    font-size: var(--text-xs);
+    line-height: 20px;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--color-text-primary);
+    line-height: 20px;
+    min-width: 0;
+  }
+}

@@ -1,0 +1,219 @@
+<div class="page">
+  <a class="back-link" routerLink="/agents"><ui-icon name="arrow-left" [size]="14" /> All agents</a>
+
+  @if (store.loading() && !agent()) {
+    <ui-skeleton [rows]="6" label="Loading agent" />
+  } @else if (agent(); as agent) {
+    <header class="profile">
+      <ui-avatar size="xl" kind="agent" [name]="agent.identity.fullName" [tone]="agent.avatarTone" [status]="agent.status" />
+      <div class="profile__identity">
+        <div class="profile__name-row">
+          <h1 class="profile__name">{{ agent.identity.fullName }}</h1>
+          <span class="chip chip--ai"><ui-icon name="agent" [size]="12" /> AI employee</span>
+          <ui-badge [presentation]="workStatus[agent.status]" />
+        </div>
+        <p class="profile__role">{{ profile().roleTitle }} · {{ profile().departmentName }}</p>
+        <p class="profile__meta">
+          <span><ui-icon name="cpu" [size]="13" /> {{ store.primaryBinding(agent).model?.name ?? 'No model' }} on {{ store.primaryBinding(agent).provider?.name ?? '—' }}</span>
+          <span><ui-icon name="clock" [size]="13" /> Last active {{ agent.lastActiveAt ? (agent.lastActiveAt | relativeTime) : 'never' }}</span>
+          <span><ui-icon name="shield-check" [size]="13" /> {{ autonomy[agent.autonomy.level].label }}</span>
+        </p>
+      </div>
+      <div class="profile__actions">
+        @if (directConversation(); as conversation) {
+          <a class="btn btn--secondary" routerLink="/communication" [queryParams]="{ conversation: conversation.id }">
+            <ui-icon name="messages" [size]="15" /> Message
+          </a>
+        }
+        <button type="button" class="btn btn--primary" (click)="editing.set(true)">
+          <ui-icon name="edit" [size]="15" /> Edit agent
+        </button>
+      </div>
+    </header>
+
+    @if (pendingApprovals().length) {
+      <a class="approval-banner" routerLink="/activity-center" [queryParams]="{ tab: 'approvals' }">
+        <ui-icon name="shield-alert" [size]="16" />
+        <span><strong>{{ pendingApprovals().length }}</strong> {{ pendingApprovals().length === 1 ? 'operation is' : 'operations are' }} waiting for your approval before {{ agent.identity.fullName }} can continue.</span>
+        <ui-icon name="chevron-right" [size]="15" />
+      </a>
+    }
+
+    <ui-tabs label="Agent sections" [items]="tabs()" [active]="tab()" (activeChange)="selectTab($event)" />
+
+    <div role="tabpanel">
+      @switch (tab()) {
+        @case ('overview') {
+          <div class="grid grid--main">
+            <div class="stack">
+              <ui-panel heading="About">
+                <p class="prose">{{ agent.identity.roleDescription }}</p>
+              </ui-panel>
+              <ui-panel heading="Current tasks" [subheading]="openTasks().length + ' open'" [flush]="true">
+                <ul>
+                  @for (task of openTasks(); track task.id) {
+                    <li>
+                      <a class="list-row list-row--interactive" [routerLink]="['/projects', task.projectId]" [queryParams]="{ task: task.id }">
+                        <span class="mono text-tertiary">{{ task.key }}</span>
+                        <span class="list-row__body"><span class="list-row__title">{{ task.title }}</span></span>
+                        <ui-badge [presentation]="taskPriority[task.priority]" [plain]="true" />
+                        <ui-badge [presentation]="taskStatus[task.status]" />
+                      </a>
+                    </li>
+                  } @empty {
+                    <ui-empty-state [compact]="true" icon="check" heading="No open tasks" />
+                  }
+                </ul>
+              </ui-panel>
+            </div>
+            <div class="stack">
+              <ui-panel heading="Assigned projects" [flush]="true">
+                <ul>
+                  @for (project of assignedProjects(); track project.id) {
+                    <li>
+                      <a class="list-row list-row--interactive" [routerLink]="['/projects', project.id]">
+                        <span class="list-row__body">
+                          <span class="list-row__title">{{ project.name }}</span>
+                          <ui-progress-bar [value]="projects.progressOf(project.id).percent" [label]="project.name + ' progress'" />
+                        </span>
+                        <ui-badge [presentation]="projectStatus[project.status]" />
+                      </a>
+                    </li>
+                  } @empty {
+                    <ui-empty-state [compact]="true" icon="projects" heading="Not assigned to a project" />
+                  }
+                </ul>
+              </ui-panel>
+              <ui-panel heading="At a glance">
+                <dl class="meta-list">
+                  <dt>Tasks completed</dt>
+                  <dd class="tabular">{{ tasks().length - openTasks().length }}</dd>
+                  <dt>Open tasks</dt>
+                  <dd class="tabular">{{ openTasks().length }}</dd>
+                  <dt>Executions</dt>
+                  <dd class="tabular">{{ executions().length }}</dd>
+                  <dt>Permission level</dt>
+                  <dd>{{ permission[agent.permissionLevel].label }}</dd>
+                  <dt>Member since</dt>
+                  <dd>{{ agent.createdAt | relativeTime }}</dd>
+                </dl>
+              </ui-panel>
+            </div>
+          </div>
+        }
+
+        @case ('responsibilities') {
+          <ui-panel heading="Responsibilities" subheading="What this agent is accountable for">
+            <ol class="numbered">
+              @for (item of agent.identity.responsibilities; track item; let i = $index) {
+                <li><span class="numbered__index tabular">{{ i + 1 }}</span>{{ item }}</li>
+              }
+            </ol>
+          </ui-panel>
+        }
+
+        @case ('skills') {
+          <ui-panel heading="Skills" subheading="Used for task routing and search">
+            <div class="chip-list skills">
+              @for (skill of agent.identity.skills; track skill) {
+                <span class="chip chip--accent">{{ skill }}</span>
+              }
+            </div>
+          </ui-panel>
+        }
+
+        @case ('configuration') {
+          <div class="grid grid--halves">
+            <ui-panel heading="AI providers" subheading="Swappable without changing the agent's identity" [flush]="true">
+              <button panelActions type="button" class="btn btn--secondary btn--sm" (click)="editing.set(true)">Change provider</button>
+              <ul>
+                @for (entry of bindings(); track entry.binding.priority + entry.binding.modelId) {
+                  <li class="list-row">
+                    <ui-icon name="cpu" [size]="16" />
+                    <span class="list-row__body">
+                      <span class="list-row__title">{{ entry.model?.name ?? 'Unknown model' }}</span>
+                      <span class="list-row__meta">{{ entry.provider?.name ?? 'Unknown provider' }} · {{ entry.provider?.deployment === 'local' ? 'Local runner' : 'Cloud' }}</span>
+                    </span>
+                    <span class="chip">{{ entry.binding.priority }}</span>
+                    @if (entry.provider) {
+                      <ui-badge [presentation]="connection[entry.provider.connectionStatus]" />
+                    }
+                  </li>
+                }
+              </ul>
+            </ui-panel>
+            <ui-panel heading="Governance">
+              <dl class="meta-list">
+                <dt>Permission level</dt>
+                <dd>{{ permission[agent.permissionLevel].label }} <span class="text-tertiary">— {{ permission[agent.permissionLevel].description }}</span></dd>
+                <dt>Autonomy</dt>
+                <dd>{{ autonomy[agent.autonomy.level].label }} <span class="text-tertiary">— {{ autonomy[agent.autonomy.level].description }}</span></dd>
+                <dt>Concurrent tasks</dt>
+                <dd class="tabular">Up to {{ agent.autonomy.maxConcurrentTasks }}</dd>
+                <dt>Approval required</dt>
+                <dd>
+                  <div class="chip-list">
+                    @for (operation of agent.autonomy.requireApprovalFor; track operation) {
+                      <span class="chip">{{ operations[operation] }}</span>
+                    } @empty {
+                      <span class="text-tertiary">None</span>
+                    }
+                  </div>
+                </dd>
+              </dl>
+            </ui-panel>
+          </div>
+          <ui-panel class="instructions" heading="System instructions">
+            <pre class="instructions__body">{{ agent.systemInstructions }}</pre>
+          </ui-panel>
+        }
+
+        @case ('activity') {
+          <div class="stack">
+            <ui-panel heading="Execution history" subheading="Reported by the orchestration engine (mock data)" [flush]="true">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Execution</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Started</th>
+                      <th scope="col">Duration</th>
+                      <th scope="col">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (execution of executions(); track execution.id) {
+                      <tr>
+                        <td class="table__primary">{{ execution.title }}</td>
+                        <td><ui-badge [presentation]="executionStatus[execution.status]" /></td>
+                        <td class="tabular">{{ execution.startedAt | relativeTime }}</td>
+                        <td class="tabular">{{ execution.startedAt | duration: execution.finishedAt }}</td>
+                        <td>{{ execution.resultSummary }}</td>
+                      </tr>
+                    } @empty {
+                      <tr><td colspan="5"><ui-empty-state [compact]="true" icon="activity" heading="No executions recorded" /></td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </ui-panel>
+            <ui-panel heading="Activity" [flush]="true">
+              @if (activity().length) {
+                <ui-activity-list [events]="activity()" />
+              } @else {
+                <ui-empty-state [compact]="true" icon="activity" heading="No activity yet" />
+              }
+            </ui-panel>
+          </div>
+        }
+      }
+    </div>
+
+    <app-agent-form-modal [open]="editing()" [agent]="agent" (closed)="editing.set(false)" (saved)="editing.set(false)" />
+  } @else {
+    <ui-empty-state icon="agent" heading="Agent not found" description="This agent does not exist in the current organization.">
+      <a class="btn btn--secondary" routerLink="/agents">Back to agents</a>
+    </ui-empty-state>
+  }
+</div>

@@ -1,0 +1,55 @@
+<div class="page">
+  <ui-page-header
+    [heading]="greeting()"
+    [description]="(workspace.currentOrganization()?.name ?? 'Your workspace') + ' control center: people, AI agents, projects and the decisions waiting for you.'"
+  >
+    <a class="btn btn--secondary" routerLink="/agents" [queryParams]="{ create: 1 }">
+      <ui-icon name="plus" [size]="15" /> New agent
+    </a>
+    <a class="btn btn--primary" routerLink="/activity-center" [queryParams]="{ tab: 'approvals' }">
+      <ui-icon name="shield-check" [size]="15" /> Review approvals
+      @if (stats().pendingApprovals) {
+        <span class="tabular">({{ stats().pendingApprovals }})</span>
+      }
+    </a>
+  </ui-page-header>
+
+  <section class="grid grid--stats" aria-label="Key figures">
+    <ui-stat-card label="Total employees" icon="users" [value]="stats().workforce" [caption]="stats().workforceCaption" />
+    <ui-stat-card label="Active AI agents" icon="agent" tone="ai" [value]="stats().activeAgents" [caption]="stats().activeAgentsCaption" />
+    <ui-stat-card label="Active projects" icon="projects" tone="accent" [value]="stats().activeProjects" [caption]="stats().activeProjectsCaption" />
+    <ui-stat-card label="Tasks in progress" icon="zap" tone="info" [value]="stats().tasksInProgress" [caption]="stats().tasksCaption" />
+    <ui-stat-card label="Pending approvals" icon="shield-alert" tone="warning" [value]="stats().pendingApprovals" [caption]="stats().pendingCaption" />
+  </section>
+
+  <div class="grid grid--main">
+    <div class="stack">
+      <app-projects-widget />
+
+      <div class="grid grid--halves">
+        <ui-panel heading="Recent activity" subheading="Latest events across agents and projects" [flush]="true">
+          <a panelActions class="link-button" routerLink="/activity-center">View all</a>
+          @if (supervision.loading()) {
+            <ui-skeleton [rows]="5" />
+          } @else if (recentActivity().length) {
+            <ui-activity-list [events]="recentActivity()" />
+          } @else {
+            <ui-empty-state [compact]="true" icon="activity" heading="No activity yet" />
+          }
+        </ui-panel>
+        <app-team-performance-widget />
+      </div>
+    </div>
+
+    <div class="stack">
+      <app-approvals-widget />
+      <app-agent-status-widget />
+      <app-meetings-widget />
+      <app-reports-widget />
+    </div>
+  </div>
+
+  @if (loading()) {
+    <span class="sr-only" role="status">Loading workspace data…</span>
+  }
+</div>
