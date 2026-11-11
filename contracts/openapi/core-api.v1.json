@@ -1,0 +1,77 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "AI Workforce Platform - Core API",
+    "description" : "Core backend of the AI Workforce Platform. All business endpoints are versioned under /api/v1 and require authentication. Errors use RFC 9457 problem details (application/problem+json). Timestamps are UTC, ISO 8601.",
+    "version" : "0.1.0-SNAPSHOT"
+  },
+  "tags" : [ {
+    "name" : "Health",
+    "description" : "Application availability"
+  } ],
+  "paths" : {
+    "/api/v1/health" : {
+      "get" : {
+        "tags" : [ "Health" ],
+        "summary" : "Get application health",
+        "description" : "Returns UP when the application and its database are available.",
+        "operationId" : "health",
+        "responses" : {
+          "200" : {
+            "description" : "Application is healthy",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "Application or one of its dependencies is unavailable",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        },
+        "security" : [ ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "HealthResponse" : {
+        "type" : "object",
+        "description" : "Overall application health.",
+        "properties" : {
+          "status" : {
+            "type" : "string",
+            "description" : "Aggregated status of the application and its dependencies.",
+            "enum" : [ "UP", "DOWN", "OUT_OF_SERVICE", "UNKNOWN" ],
+            "example" : "UP"
+          },
+          "service" : {
+            "type" : "string",
+            "description" : "Service name.",
+            "example" : "core-api"
+          },
+          "version" : {
+            "type" : "string",
+            "description" : "Application version, used by clients to check compatibility.",
+            "example" : "0.1.0"
+          },
+          "timestamp" : {
+            "type" : "string",
+            "format" : "date-time",
+            "description" : "Time of the check (UTC, ISO 8601).",
+            "example" : "2026-11-11T10:15:30Z"
+          }
+        }
+      }
+    }
+  }
+}

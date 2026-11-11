@@ -1,0 +1,58 @@
+# Local development and integration stack.
+#
+#   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d postgres
+#   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile app up -d --build
+#
+# Credentials come from infra/docker/.env (never committed, see .env.example).
+name: ai-workforce
+
+services:
+  postgres:
+    # PostgreSQL 18 with the pgvector extension available (enabled by Flyway V1).
+    image: pgvector/pgvector:0.8.7-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      # Store timestamps and logs in UTC.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      # Bound to the loopback interface only: the database is not reachable from the network.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 images keep their data under /var/lib/postgresql/<major>/docker.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  core-api:
+    # Opt-in: only started with `--profile app` (developers usually run the API from Maven).
+    profiles: ["app"]
+    build:
+      context: ../../services/core-api
+    image: ai-workforce/core-api:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SERVER_PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+
+volumes:
+  postgres-data:
+    name: ai-workforce-postgres-data

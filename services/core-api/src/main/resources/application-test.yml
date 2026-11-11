@@ -1,0 +1,9 @@
+# Automated tests. The datasource is provided by Testcontainers (@ServiceConnection).
+app:
+  cors:
+    allowed-origins: http://localhost:4200
+
+logging:
+  level:
+    com.aiworkforce.core: DEBUG
+    org.testcontainers: INFO

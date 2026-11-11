@@ -1,0 +1,12 @@
+# Environment files hold credentials: never commit them. Only *.env.example is versioned.
+.env
+.env.*
+*.env
+!.env.example
+!*.env.example
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
