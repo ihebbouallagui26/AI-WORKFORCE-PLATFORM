@@ -6,9 +6,10 @@ spring:
 
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:ai_workforce}
-    # No defaults: the application must not start with implicit credentials.
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # Runtime role: data access only (no DDL). No defaults: the application must not start
+    # with implicit credentials. See infra/docker/postgres/init-roles.sh.
+    username: ${DB_APP_USERNAME}
+    password: ${DB_APP_PASSWORD}
     hikari:
       pool-name: core-api-pool
       maximum-pool-size: 10
@@ -33,13 +34,23 @@ spring:
     locations: classpath:db/migration
     validate-on-migrate: true
     clean-disabled: true
+    # Migrations run with a dedicated role that owns the schema (DDL); the runtime pool never does.
+    user: ${DB_MIGRATION_USERNAME}
+    password: ${DB_MIGRATION_PASSWORD}
+    init-sqls: SET TIME ZONE 'UTC'
+    placeholders:
+      app_role: ${DB_APP_USERNAME}
+
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:25}
 
   jackson:
     time-zone: UTC
 
   autoconfigure:
-    # Prevents Spring Boot from creating an in-memory user with a generated password.
-    # Authentication is implemented in Sprint B1; until then no credentials exist at all.
+    # Prevents Spring Boot from creating an in-memory user with a generated password:
+    # the only authentication mechanism is the OAuth 2.0 bearer token (see SecurityConfig).
     exclude: org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration
 
   threads:
@@ -56,6 +67,11 @@ server:
     include-exception: false
 
 management:
+  health:
+    mail:
+      # SMTP only affects invitations (they answer 503 when it is down): it must not make the
+      # whole API unready.
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -80,6 +96,15 @@ app:
   cors:
     # Required in every environment. Exact origins only (no wildcard).
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:}
+  security:
+    oidc:
+      # Required: tokens must come from this issuer and target this audience.
+      issuer: ${OIDC_ISSUER:}
+      jwk-set-uri: ${OIDC_JWK_SET_URI:}
+      audience: ${OIDC_AUDIENCE:}
+  invitations:
+    ttl: 7d
+    mail-from: ${INVITATION_MAIL_FROM:no-reply@aiworkforce.local}
 
 springdoc:
   # Disabled by default; enabled in the dev profile only.

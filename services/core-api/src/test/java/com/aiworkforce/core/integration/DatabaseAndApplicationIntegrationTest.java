@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.aiworkforce.core.support.TestcontainersConfiguration;
 import jakarta.persistence.EntityManagerFactory;
-import java.util.Map;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -44,6 +44,9 @@ class DatabaseAndApplicationIntegrationTest {
     @Autowired
     private ApplicationContext context;
 
+    @Autowired
+    private Flyway flyway;
+
     @Test
     void connectsToPostgresql18() {
         Integer major = jdbc.queryForObject("SELECT current_setting('server_version_num')::int / 10000", Integer.class);
@@ -53,11 +56,11 @@ class DatabaseAndApplicationIntegrationTest {
 
     @Test
     void appliesFlywayMigrations() {
-        Map<String, Object> v1 = jdbc.queryForMap(
-                "SELECT version, success FROM flyway_schema_history WHERE version = '1'");
-        assertThat(v1).containsEntry("version", "1").containsEntry("success", true);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE NOT success", Long.class))
-                .isZero();
+        // The history is read through Flyway (migration role): the runtime role cannot read it.
+        assertThat(flyway.info().applied()).extracting(info -> info.getVersion().getVersion())
+                .contains("1", "2");
+        assertThat(flyway.info().applied()).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
+        assertThat(flyway.info().pending()).isEmpty();
     }
 
     @Test

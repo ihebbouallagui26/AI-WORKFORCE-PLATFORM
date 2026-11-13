@@ -11,6 +11,8 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -18,6 +20,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -101,11 +104,43 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 "The requested " + ex.resourceType() + " was not found.", request));
     }
 
+    @ExceptionHandler(BadRequestException.class)
+    ResponseEntity<ProblemDetail> handleBadRequest(BadRequestException ex, WebRequest request) {
+        return ResponseEntity.badRequest()
+                .body(problem(HttpStatus.BAD_REQUEST, ProblemType.BAD_REQUEST, ex.getMessage(), request));
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    ResponseEntity<ProblemDetail> handleConflict(ConflictException ex, WebRequest request) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(problem(HttpStatus.CONFLICT, ProblemType.CONFLICT, ex.getMessage(), request));
+    }
+
+    /** Concurrent modification (optimistic locking) or a unique constraint hit by a race. */
+    @ExceptionHandler({OptimisticLockingFailureException.class, DataIntegrityViolationException.class})
+    ResponseEntity<ProblemDetail> handleConcurrentModification(Exception ex, WebRequest request) {
+        log.info("Conflicting write on {}: {}", path(request), ex.getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(problem(HttpStatus.CONFLICT, ProblemType.CONFLICT,
+                "The resource was modified concurrently or conflicts with existing data. Reload and retry.",
+                request));
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    ResponseEntity<ProblemDetail> handleServiceUnavailable(ServiceUnavailableException ex, WebRequest request) {
+        log.warn("Dependency unavailable on {}", path(request), ex);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(problem(HttpStatus.SERVICE_UNAVAILABLE,
+                ProblemType.SERVICE_UNAVAILABLE, ex.getMessage(), request));
+    }
+
     /** Also reached from the security filter chain for unauthenticated requests. */
     @ExceptionHandler(AuthenticationException.class)
     ResponseEntity<ProblemDetail> handleAuthentication(AuthenticationException ex, WebRequest request) {
+        // RFC 6750: a presented but rejected token is reported as invalid_token (no details).
+        String challenge = ex instanceof OAuth2AuthenticationException
+                ? AUTHENTICATE_CHALLENGE + ", error=\"invalid_token\""
+                : AUTHENTICATE_CHALLENGE;
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .header(HttpHeaders.WWW_AUTHENTICATE, AUTHENTICATE_CHALLENGE)
+                .header(HttpHeaders.WWW_AUTHENTICATE, challenge)
                 .body(problem(HttpStatus.UNAUTHORIZED, ProblemType.UNAUTHORIZED,
                         "Authentication is required to access this resource.", request));
     }

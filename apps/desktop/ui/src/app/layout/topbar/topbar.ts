@@ -3,6 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink } from '@angular/router';
 import { filter, map, startWith } from 'rxjs';
 import { ActivityEvent } from '../../core/models';
+import { SessionService } from '../../core/auth/session.service';
 import { ToastService } from '../../core/services/toast.service';
 import { SupervisionStore } from '../../core/state/supervision.store';
 import { WorkspaceStore } from '../../core/state/workspace.store';
@@ -32,6 +33,7 @@ export class Topbar {
   private readonly layout = inject(LayoutService);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
+  protected readonly session = inject(SessionService);
 
   protected readonly activityPresentation = ACTIVITY_EVENT;
 
@@ -70,6 +72,15 @@ export class Topbar {
       await this.supervision.markAllActivityRead();
     } catch (error) {
       this.toast.error('Could not update notifications', error);
+    }
+  }
+
+  protected async signOut(): Promise<void> {
+    try {
+      await this.session.logout();
+      void this.router.navigateByUrl('/login');
+    } catch (error) {
+      this.toast.error('Could not sign out', error);
     }
   }
 

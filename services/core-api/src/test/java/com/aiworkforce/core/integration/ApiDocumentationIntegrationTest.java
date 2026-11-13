@@ -42,11 +42,27 @@ class ApiDocumentationIntegrationTest {
                 .andExpect(jsonPath("$.openapi").exists())
                 .andExpect(jsonPath("$.info.title").value("AI Workforce Platform - Core API"))
                 .andExpect(jsonPath("$.paths['/api/v1/health'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/health'].get.security").isEmpty())
+                .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
+                .andExpect(jsonPath("$.security[0].bearerAuth").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/me'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}'].patch").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/members/{membershipId}/roles'].put")
+                        .exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/roles'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/invitations'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/invitations/accept'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/permissions'].get").exists())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
         JsonMapper mapper = JsonMapper.builder().build();
         JsonNode document = mapper.readTree(json);
         document.get("paths").propertyNames().forEach(path -> assertThat(path).startsWith("/api/"));
+        // No schema exposes invitation secrets.
+        assertThat(document.get("components").get("schemas").toString()).doesNotContain("tokenHash");
+        assertThat(document.get("components").get("schemas").get("Invitation").get("properties").has("token"))
+                .isFalse();
 
         // Stable output for the published contract: drop the server URL (depends on the test port).
         ((tools.jackson.databind.node.ObjectNode) document).remove("servers");

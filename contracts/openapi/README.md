@@ -11,4 +11,4 @@ cd services/core-api && ./mvnw test
 cp target/openapi/core-api.v1.json ../../contracts/openapi/core-api.v1.json
 ```
 
-Commit the updated contract with the code change, so reviewers see API changes explicitly. Sprint B1 will add a CI check that fails when the committed contract differs from the generated one, and will generate the desktop's TypeScript types from it.
+Commit the updated contract with the code change, so reviewers see API changes explicitly. CI (`.github/workflows/ci.yml`) fails when the committed contract differs from the generated one. The file is kept with LF line endings (`.gitattributes`). The desktop's DTOs (`apps/desktop/ui/src/app/core/identity/identity.models.ts`) are maintained by hand from it for now.

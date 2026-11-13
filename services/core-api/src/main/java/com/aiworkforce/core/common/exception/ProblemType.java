@@ -15,6 +15,7 @@ public enum ProblemType {
     METHOD_NOT_ALLOWED("method-not-allowed", "Method not allowed"),
     UNSUPPORTED_MEDIA_TYPE("unsupported-media-type", "Unsupported media type"),
     CONFLICT("conflict", "Conflict"),
+    SERVICE_UNAVAILABLE("service-unavailable", "Service unavailable"),
     INTERNAL_ERROR("internal-error", "Internal server error");
 
     private static final String PREFIX = "urn:aiworkforce:problem:";
@@ -45,6 +46,7 @@ public enum ProblemType {
             case 405 -> METHOD_NOT_ALLOWED;
             case 409 -> CONFLICT;
             case 415 -> UNSUPPORTED_MEDIA_TYPE;
+            case 503 -> SERVICE_UNAVAILABLE;
             default -> status >= 500 ? INTERNAL_ERROR : BAD_REQUEST;
         };
     }

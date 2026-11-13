@@ -17,6 +17,8 @@ import com.aiworkforce.core.health.HealthResponse;
 import com.aiworkforce.core.support.TestSupportController;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
+import com.aiworkforce.core.auth.AccessTokenDecoderConfig;
+import com.aiworkforce.core.identity.UserProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,7 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 /** HTTP security policy for anonymous callers: deny by default, explicit public endpoints, strict CORS. */
 @WebMvcTest(controllers = {HealthController.class, TestSupportController.class})
-@Import({SecurityConfig.class, CorsConfig.class, TimeConfig.class})
+@Import({SecurityConfig.class, CorsConfig.class, TimeConfig.class, AccessTokenDecoderConfig.class})
 @ActiveProfiles({"test", "test-support"})
 class SecurityConfigTest {
 
@@ -39,6 +41,10 @@ class SecurityConfigTest {
 
     @Autowired
     private MockMvc mvc;
+
+    /** Required by the identity argument resolver; not used by these endpoints. */
+    @MockitoBean
+    private UserProvisioningService provisioning;
 
     @MockitoBean
     private ApplicationHealthService healthService;
@@ -82,6 +88,15 @@ class SecurityConfigTest {
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(content().string(not(containsString("Exception"))))
                 .andExpect(content().string(not(containsString("trace"))));
+    }
+
+    @Test
+    void rejectsAMalformedBearerTokenAsInvalidToken() throws Exception {
+        mvc.perform(get("/api/v1/test-support/items/1").header(HttpHeaders.AUTHORIZATION, "Bearer not-a-jwt"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE,
+                        "Bearer realm=\"ai-workforce\", error=\"invalid_token\""))
+                .andExpect(jsonPath("$.type").value("urn:aiworkforce:problem:unauthorized"));
     }
 
     @Test

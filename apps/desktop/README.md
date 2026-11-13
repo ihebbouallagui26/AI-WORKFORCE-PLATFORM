@@ -1,8 +1,8 @@
-# AI Workforce Platform — Desktop (Phase A)
+# AI Workforce Platform — Desktop
 
 Desktop control center for a hybrid human + AI workforce, built with **Angular 22** (standalone components, signals, zoneless) and **Electron 45**.
 
-Phase A is a frontend-only build: every screen runs on **mock data held in memory**. Nothing is sent to a server, no AI agent executes anything, and approval decisions are recorded locally only. The UI says so wherever it matters.
+Since Sprint B1 the desktop signs in with Keycloak (Authorization Code + PKCE in the system browser, driven by the Electron main process) and uses the Core API for the **user profile, organizations, members, roles and invitations**. Agents, projects, communication, supervision and departments still run on **demo data held in memory** (labelled “Demo data”): nothing of these is sent to a server and no AI agent executes anything. See [`docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md`](../../docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md).
 
 ## Layout
 
@@ -59,7 +59,8 @@ npm 11 does not run package install scripts by default. Electron downloads its b
 
 | Goal | Command (from `apps/desktop`) |
 | --- | --- |
-| Angular in the browser (http://localhost:4200) | `npm run ui:start` |
+| Angular in the browser, demo data, no sign-in | `cd ui && npx ng serve --configuration mock` |
+| Angular dev server for Electron (api mode) | `npm run ui:start` |
 | Desktop app with live reload (Angular dev server + Electron) | `npm run dev` |
 | Desktop app on the production build | `npm start` |
 | All tests (Electron policy + Angular) | `npm test` |
@@ -70,6 +71,8 @@ npm 11 does not run package install scripts by default. Electron downloads its b
 | Installer (NSIS on Windows, DMG on macOS, AppImage on Linux) | `npm run package` |
 
 In development, DevTools open with **F12** or **Ctrl+Shift+I**. They are disabled in packaged builds.
+
+**Sign-in prerequisites (api mode):** the local stack (`docker compose ... up -d --wait`, see `infra/keycloak/README.md`) and the Core API on port 8081. Optional environment variables for the Electron process: `AIW_OIDC_ISSUER`, `AIW_OIDC_CLIENT_ID`, `AIW_API_BASE_URL`. Opt-in end-to-end test against the local Keycloak: `AIW_KEYCLOAK_ADMIN_PASSWORD=<from infra/docker/.env> npm run electron:test`.
 
 To run the Angular dev server on another port, call the CLI directly (`cd ui && npx ng serve --port 4201`). `npm run ui:start -- --port 4201` does not forward the flag correctly.
 
@@ -82,7 +85,7 @@ Components never touch data sources directly:
 
 `feature component → signal store (core/state) → abstract API (core/data/api) → implementation`
 
-`provideDataLayer(environment)` binds each abstract API to its **mock** implementation. To connect the Spring Boot Core API, add HTTP implementations of the same abstract classes, register them for `dataSource: 'api'`, and leave the features as they are. The base URL is only read through the `API_CONFIG` token.
+`provideDataLayer(environment)` binds each abstract API to an implementation. With `dataSource: 'api'` (default) the workspace (`WorkspaceApi`) is backed by the Core API through `IdentityApi` → `BackendClient` → `window.desktop.api` (the main process adds the token); the other domains use the mock implementations through a demo scope (always the demo organization). With `dataSource: 'mock'` (`--configuration mock`, unit tests) everything is in memory and no sign-in is required.
 
 `MessagingApi.incoming$` is the seam for the future WebSocket gateway. The mock never emits on it, and agents never fake a reply.
 
@@ -99,18 +102,19 @@ An `Agent` has an `identity` (name, department, role, responsibilities, skills) 
 ## Electron security
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` (plus `app.enableSandbox()`), `webviewTag: false`.
-- The preload exposes only `window.desktop.getAppInfo()` and `window.desktop.openExternal(url)`. There is no raw IPC, Node.js, filesystem or process access.
+- The preload exposes only `window.desktop.getAppInfo()`, `openExternal(url)`, `auth.{getSession, login, cancelLogin, logout, onSessionChanged}` and `api.request(...)`. There is no raw IPC, Node.js, filesystem, process or token access.
+- OIDC runs in the main process (openid-client); the access token stays in main-process memory, the refresh token is encrypted with `safeStorage` (memory only when the OS cannot protect it). `api.request` only executes allowlisted Core API operations.
 - IPC handlers reject calls that do not come from the main frame of an application page, or that carry unexpected arguments. `openExternal` only accepts `https:` URLs on an allowlist, without embedded credentials.
 - Navigation away from the app (top frame and sub-frames) is blocked, new windows are denied, and every permission request is refused.
 - Packaged builds refuse to start with debugging switches (`--remote-debugging-port`, `--inspect`, …). Electron fuses disable `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect`, enforce asar integrity, and only load the app from the asar archive.
 - Content Security Policy: `script-src 'self'`, no inline scripts, no `eval`, `connect-src 'self'`. It is applied to the `app://` protocol responses (production) and to dev-server responses.
 - The production renderer is served from a privileged `app://workforce` scheme with path-traversal protection and an SPA fallback, so Angular deep links work in packaged builds.
-- No credentials, tokens or provider secrets are stored in the client. `localStorage` only holds UI preferences.
+- No client secret exists (public client). Tokens never reach the renderer; `localStorage` only holds UI preferences (including the last selected organization id, which the API re-authorizes on every call).
 
 ## Known limitations
 
-- Mock data only: changes last for the current session and are lost on restart.
-- No authentication. The signed-in user is a fixture.
+- Agents, projects, communication, supervision and departments are demo data: changes last for the current session only.
+- The job title in the profile is local (the Core API stores only the display name).
 - Agents do not execute tasks or reply, and approvals are not delivered to agents.
 - Voice messages, calls and attachments are shown as disabled “coming soon” controls.
 - The default Electron icon is used, and installers are unsigned.

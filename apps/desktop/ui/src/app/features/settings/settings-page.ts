@@ -1,26 +1,36 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { AUTH_REQUIRED } from '../../core/auth/session.service';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { Icon } from '../../shared/components/icon/icon';
 import { IconName } from '../../shared/components/icon/icon-registry';
 import { PageHeader } from '../../shared/components/page-header/page-header';
 import { AboutSettings } from './sections/about-settings';
+import { InvitationsSettings } from './sections/invitations-settings';
+import { MembersSettings } from './sections/members-settings';
+import { RolesSettings } from './sections/roles-settings';
 import { GeneralSettings } from './sections/general-settings';
 import { OrganizationSettings } from './sections/organization-settings';
 import { ProviderSettings } from './sections/provider-settings';
 
-type SettingsSection = 'general' | 'organization' | 'providers' | 'about';
+type SettingsSection = 'general' | 'organization' | 'members' | 'roles' | 'invitations' | 'providers' | 'about';
+
+/** Sections backed by the Core API: only in `api` mode. */
+const API_SECTIONS: ReadonlySet<SettingsSection> = new Set(['members', 'roles', 'invitations']);
 
 const SECTIONS: readonly { id: SettingsSection; label: string; icon: IconName }[] = [
   { id: 'general', label: 'General', icon: 'settings' },
   { id: 'organization', label: 'Organization', icon: 'building' },
+  { id: 'members', label: 'Members', icon: 'users' },
+  { id: 'roles', label: 'Roles & permissions', icon: 'lock' },
+  { id: 'invitations', label: 'Invitations', icon: 'mail' },
   { id: 'providers', label: 'AI providers', icon: 'cpu' },
   { id: 'about', label: 'About & security', icon: 'shield-check' },
 ];
 
 @Component({
   selector: 'app-settings-page',
-  imports: [RouterLink, RouterLinkActive, PageHeader, Icon, EmptyState, GeneralSettings, OrganizationSettings, ProviderSettings, AboutSettings],
+  imports: [RouterLink, RouterLinkActive, PageHeader, Icon, EmptyState, GeneralSettings, OrganizationSettings, MembersSettings, RolesSettings, InvitationsSettings, ProviderSettings, AboutSettings],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -37,6 +47,9 @@ const SECTIONS: readonly { id: SettingsSection; label: string; icon: IconName }[
           @switch (current()) {
             @case ('general') { <app-general-settings /> }
             @case ('organization') { <app-organization-settings /> }
+            @case ('members') { <app-members-settings /> }
+            @case ('roles') { <app-roles-settings /> }
+            @case ('invitations') { <app-invitations-settings /> }
             @case ('providers') { <app-provider-settings /> }
             @case ('about') { <app-about-settings /> }
             @default {
@@ -98,8 +111,9 @@ const SECTIONS: readonly { id: SettingsSection; label: string; icon: IconName }[
 export class SettingsPage {
   /** Route parameter bound by the router. */
   readonly section = input<string>('general');
-  protected readonly sections = SECTIONS;
+  private readonly apiMode = inject(AUTH_REQUIRED);
+  protected readonly sections = SECTIONS.filter((s) => this.apiMode || !API_SECTIONS.has(s.id));
   protected readonly current = computed<SettingsSection | null>(
-    () => SECTIONS.find((s) => s.id === this.section())?.id ?? null,
+    () => this.sections.find((s) => s.id === this.section())?.id ?? null,
   );
 }

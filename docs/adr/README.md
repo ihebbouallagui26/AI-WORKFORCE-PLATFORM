@@ -11,5 +11,9 @@ Short records of significant decisions: context, decision, consequences. An acce
 | [0005](ADR-0005-problem-details.md) | RFC 9457 problem details for every error | Accepted |
 | [0006](ADR-0006-configuration-and-secrets.md) | Production-safe base configuration, secrets from the environment | Accepted |
 | [0007](ADR-0007-stateless-deny-by-default-security.md) | Stateless, deny-by-default API security before authentication | Accepted |
+| [0008](ADR-0008-keycloak-identity-provider.md) | Keycloak as OpenID Connect provider, API as OAuth2 resource server | Accepted |
+| [0009](ADR-0009-tenant-isolation-by-membership.md) | Tenant isolation by membership check and organization-scoped repositories | Accepted |
+| [0010](ADR-0010-desktop-oidc-in-main-process.md) | Desktop OIDC in the Electron main process, API calls proxied over IPC | Accepted |
+| [0011](ADR-0011-database-privilege-separation.md) | Separate database roles for migrations, runtime and Keycloak | Accepted |
 
 Template: `# ADR-NNNN — Title` · Status · Date · Context · Decision · Consequences · Alternatives considered.

@@ -91,6 +91,8 @@ Mapping between entities and DTOs is explicit: hand-written mappers or records. 
 
 ## 4. Multi-tenancy strategy
 
+> Implemented in Sprint B1: see [MULTI_TENANCY_ARCHITECTURE.md](MULTI_TENANCY_ARCHITECTURE.md). Modules now present: `identity`, `auth`, `audit`, `access`, `organization`, `invitation`.
+
 Shared database, shared schema, **`organization_id` on every organization-owned row**.
 
 | Concern | Strategy |
