@@ -54,6 +54,19 @@ class ApiDocumentationIntegrationTest {
                 .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/invitations'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/invitations/accept'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/permissions'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees/{employeeId}'].patch").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees/{employeeId}/manager'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees/{employeeId}/status'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees/{employeeId}/teams'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/departments/tree'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/departments/{departmentId}/parent'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/positions'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/positions/{positionId}'].patch").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/teams'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/teams/{teamId}/members'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/teams/{teamId}/members/{employeeId}'].delete").exists())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
         JsonMapper mapper = JsonMapper.builder().build();

@@ -22,6 +22,16 @@ public enum Permission {
     INVITATION_CREATE("invitation.create"),
     INVITATION_REVOKE("invitation.revoke"),
     AUDIT_READ("audit.read"),
+    EMPLOYEE_READ("employee.read"),
+    EMPLOYEE_CREATE("employee.create"),
+    EMPLOYEE_MANAGE("employee.manage"),
+    EMPLOYEE_DEACTIVATE("employee.deactivate"),
+    DEPARTMENT_READ("department.read"),
+    DEPARTMENT_MANAGE("department.manage"),
+    POSITION_READ("position.read"),
+    POSITION_MANAGE("position.manage"),
+    TEAM_READ("team.read"),
+    TEAM_MANAGE("team.manage"),
     /** Reserved to the built-in OWNER role: never grantable to custom roles. */
     OWNERSHIP_MANAGE("ownership.manage");
 

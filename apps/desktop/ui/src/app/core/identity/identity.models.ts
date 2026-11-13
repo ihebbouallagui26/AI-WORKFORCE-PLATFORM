@@ -12,7 +12,17 @@ export type PermissionCode =
   | 'invitation.create'
   | 'invitation.revoke'
   | 'audit.read'
-  | 'ownership.manage';
+  | 'ownership.manage'
+  | 'employee.read'
+  | 'employee.create'
+  | 'employee.manage'
+  | 'employee.deactivate'
+  | 'department.read'
+  | 'department.manage'
+  | 'position.read'
+  | 'position.manage'
+  | 'team.read'
+  | 'team.manage';
 
 export type BuiltInRoleCode = 'OWNER' | 'ADMIN' | 'MEMBER';
 

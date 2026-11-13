@@ -88,6 +88,55 @@ class ArchitectureTest {
             .should().notBePublic()
             .because("other modules go through the owning module's services");
 
+    // ---- workforce modules (Sprint B2): fixed dependency order, ports instead of cycles ----
+    private static final String CORE = "com.aiworkforce.core.";
+
+    @ArchTest
+    static final ArchRule workforceKernelDependsOnNoModule = noClasses()
+            .that().resideInAPackage(CORE + "workforce..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "department..", CORE + "position..",
+                    CORE + "employee..", CORE + "team..", CORE + "access..", CORE + "organization..")
+            .because("the shared kernel only declares ports; modules depend on it, never the reverse");
+
+    @ArchTest
+    static final ArchRule departmentsDoNotDependOnOtherWorkforceModules = noClasses()
+            .that().resideInAPackage(CORE + "department..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "position..", CORE + "employee..", CORE + "team..")
+            .because("departments reach employees only through the EmployeeDirectory port");
+
+    @ArchTest
+    static final ArchRule positionsOnlyDependOnDepartments = noClasses()
+            .that().resideInAPackage(CORE + "position..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "employee..", CORE + "team..");
+
+    @ArchTest
+    static final ArchRule employeesDoNotDependOnTeams = noClasses()
+            .that().resideInAPackage(CORE + "employee..")
+            .should().dependOnClassesThat().resideInAPackage(CORE + "team..")
+            .because("teams react to employee lifecycle through EmployeeLifecycleParticipant");
+
+    @ArchTest
+    static final ArchRule teamsDoNotDependOnEmployeesOrPositions = noClasses()
+            .that().resideInAPackage(CORE + "team..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "employee..", CORE + "position..")
+            .because("team members are employees, but only through the EmployeeDirectory port");
+
+    @ArchTest
+    static final ArchRule identityAndAccessKnowNothingOfTheWorkforce = noClasses()
+            .that().resideInAnyPackage(CORE + "identity..", CORE + "auth..", CORE + "audit..", CORE + "access..",
+                    CORE + "organization..", CORE + "invitation..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "department..", CORE + "position..",
+                    CORE + "employee..", CORE + "team..", CORE + "workforce..")
+            .because("authorization and tenancy do not depend on the HR domain built on top of them");
+
+    @ArchTest
+    static final ArchRule workforceServicesAlwaysCheckTheTenantFirst = classes()
+            .that().areAnnotatedWith(Service.class)
+            .and().resideInAnyPackage(CORE + "department..", CORE + "position..", CORE + "employee..", CORE + "team..")
+            .and().haveSimpleNameEndingWith("Service")
+            .should().dependOnClassesThat().haveFullyQualifiedName(CORE + "access.TenantAccessService")
+            .because("every workforce service starts operations with the membership and permission check");
+
     @ArchTest
     static final ArchRule noFieldInjection = noFields()
             .should().beAnnotatedWith(Autowired.class)

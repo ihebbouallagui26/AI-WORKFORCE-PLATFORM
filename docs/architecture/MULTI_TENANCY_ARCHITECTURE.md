@@ -24,6 +24,7 @@ The organization id in the URL only *selects* an organization; it is never trust
 | `access` | Memberships, roles, permissions, tenant check, anti-escalation | identity, audit |
 | `organization` | Organization lifecycle, audit listing | access, identity, audit |
 | `invitation` | Invitations and acceptance | access, organization, identity, audit |
+| `workforce`, `department`, `position`, `employee`, `team` | Employees, departments, positions, teams (Sprint B2) | access, audit — see [WORKFORCE_MANAGEMENT_ARCHITECTURE.md](WORKFORCE_MANAGEMENT_ARCHITECTURE.md) |
 
 Repositories are package-private (other modules call services). ArchUnit enforces: no module cycles, controllers never use repositories or entities, repositories are not public, every method declared in a `@TenantScoped` repository contains `Organization` in its name (it takes the organization id), and nobody calls the unscoped inherited methods (`findById`, `findAll`, `count`, `deleteById`, ...) on a tenant repository.
 
@@ -36,13 +37,13 @@ Repositories are package-private (other modules call services). ArchUnit enforce
 
 Permission catalog (table `permissions`, seeded by V2, mirrored by the `Permission` enum; a test keeps them identical):
 
-`organization.read`, `organization.update`, `member.read`, `member.manage`, `member.roles.assign`, `role.read`, `role.manage`, `invitation.read`, `invitation.create`, `invitation.revoke`, `audit.read`, `ownership.manage`.
+`organization.read`, `organization.update`, `member.read`, `member.manage`, `member.roles.assign`, `role.read`, `role.manage`, `invitation.read`, `invitation.create`, `invitation.revoke`, `audit.read`, `ownership.manage` (B1), and since V3 (Sprint B2, workforce): `employee.read`, `employee.create`, `employee.manage`, `employee.deactivate`, `department.read`, `department.manage`, `position.read`, `position.manage`, `team.read`, `team.manage`. Their meaning and the built-in role matrix are in [WORKFORCE_MANAGEMENT_ARCHITECTURE.md](WORKFORCE_MANAGEMENT_ARCHITECTURE.md) §4.
 
 | Built-in role | Permissions |
 | --- | --- |
 | OWNER | all |
-| ADMIN | all except `ownership.manage` |
-| MEMBER | `organization.read`, `member.read`, `role.read` |
+| ADMIN | all except `ownership.manage` (including every workforce permission) |
+| MEMBER | `organization.read`, `member.read`, `role.read`, `employee.read`, `department.read`, `position.read`, `team.read` |
 
 Custom roles are organization-scoped sets of permissions (max 50 per organization). Built-in roles cannot be modified or deleted; a custom role still assigned cannot be deleted.
 

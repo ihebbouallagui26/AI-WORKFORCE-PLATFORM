@@ -3,9 +3,10 @@
 Core backend of the AI Workforce Platform: a **Spring Boot modular monolith** on PostgreSQL.
 
 - **Sprint B0** — foundation: configuration profiles, PostgreSQL + Flyway, deny-by-default security, RFC 9457 errors, health, OpenAPI, request correlation, tests.
+- **Sprint B2** — workforce management: employees (professional profiles, optionally linked to a platform membership), hierarchical departments, positions (job titles, never permissions) and teams with member history, on top of the B1 tenant model.
 - **Sprint B1** — authentication (OAuth2 resource server, Keycloak access tokens), user provisioning by `(issuer, subject)`, organizations, memberships, RBAC (built-in and custom roles, anti-escalation), strict multi-tenant isolation, invitations by e-mail, audit trail, separate database roles.
 
-Identity: [`IDENTITY_ARCHITECTURE.md`](../../docs/architecture/IDENTITY_ARCHITECTURE.md) · Multi-tenancy: [`MULTI_TENANCY_ARCHITECTURE.md`](../../docs/architecture/MULTI_TENANCY_ARCHITECTURE.md) · Schema: [`IDENTITY_AND_ORGANIZATION_SCHEMA.md`](../../docs/database/IDENTITY_AND_ORGANIZATION_SCHEMA.md) · Architecture: [`docs/architecture/CORE_BACKEND_ARCHITECTURE.md`](../../docs/architecture/CORE_BACKEND_ARCHITECTURE.md) · Security: [`docs/architecture/SECURITY_ARCHITECTURE.md`](../../docs/architecture/SECURITY_ARCHITECTURE.md) · Decisions: [`docs/adr`](../../docs/adr)
+Workforce: [`WORKFORCE_MANAGEMENT_ARCHITECTURE.md`](../../docs/architecture/WORKFORCE_MANAGEMENT_ARCHITECTURE.md) · Data model: [`WORKFORCE_DATA_MODEL.md`](../../docs/database/WORKFORCE_DATA_MODEL.md) · Identity: [`IDENTITY_ARCHITECTURE.md`](../../docs/architecture/IDENTITY_ARCHITECTURE.md) · Multi-tenancy: [`MULTI_TENANCY_ARCHITECTURE.md`](../../docs/architecture/MULTI_TENANCY_ARCHITECTURE.md) · Schema: [`IDENTITY_AND_ORGANIZATION_SCHEMA.md`](../../docs/database/IDENTITY_AND_ORGANIZATION_SCHEMA.md) · Architecture: [`docs/architecture/CORE_BACKEND_ARCHITECTURE.md`](../../docs/architecture/CORE_BACKEND_ARCHITECTURE.md) · Security: [`docs/architecture/SECURITY_ARCHITECTURE.md`](../../docs/architecture/SECURITY_ARCHITECTURE.md) · Decisions: [`docs/adr`](../../docs/adr)
 
 ## Technology stack
 
@@ -72,7 +73,7 @@ Secrets are never committed: `.env` files are ignored by Git, and only `*.env.ex
 ## Database and migrations
 
 - The schema is owned by **Flyway**: `src/main/resources/db/migration/V<n>__<description>.sql`. Migrations run automatically at startup, before Hibernate validates the schema (`ddl-auto=validate`).
-- `V1__enable_extensions.sql` enables `pgvector`; `V2__identity_and_organizations.sql` adds identity, organizations, RBAC, invitations and audit. `afterMigrate.sql` re-applies the runtime role's grants.
+- `V1__enable_extensions.sql` enables `pgvector`; `V2__identity_and_organizations.sql` adds identity, organizations, RBAC, invitations and audit; `V3__workforce_management.sql` adds employee profiles, departments, positions, teams and ten permissions (granted to the built-in roles of existing organizations). `afterMigrate.sql` re-applies the runtime role's grants.
 - Flyway runs as `DB_MIGRATION_USERNAME`; the application pool uses `DB_APP_USERNAME` (see [ADR-0011](../../docs/adr/ADR-0011-database-privilege-separation.md)).
 - Applied migrations are immutable. A fix is a new migration, and `flyway clean` is disabled.
 - Conventions: [`docs/database/DATABASE_CONVENTIONS.md`](../../docs/database/DATABASE_CONVENTIONS.md).
@@ -95,6 +96,10 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 | `/api/v1/organizations[/{organizationId}]` | bearer token + membership | List/create/get/update organizations, audit events |
 | `/api/v1/organizations/{id}/members`, `/roles`, `/invitations` | bearer token + membership + permission | Members, roles and invitations |
 | `GET /api/v1/permissions`, `POST /api/v1/invitations/accept` | bearer token | Permission catalog, invitation acceptance |
+| `/api/v1/organizations/{id}/employees` (+ `/{employeeId}`, `/department`, `/position`, `/manager`, `/membership`, `/status`, `/teams`) | bearer token + membership + `employee.*` | Employee profiles: search, filters, assignments, lifecycle |
+| `/api/v1/organizations/{id}/departments` (+ `/tree`, `/{id}`, `/parent`, `/head`, `/archive`, `/restore`) | bearer token + membership + `department.*` | Department hierarchy |
+| `/api/v1/organizations/{id}/positions` (+ `/{id}`, `/department`, `/archive`, `/restore`) | bearer token + membership + `position.*` | Position catalog |
+| `/api/v1/organizations/{id}/teams` (+ `/{id}`, `/department`, `/leader`, `/members`, `/archive`, `/restore`) | bearer token + membership + `team.*` | Teams and their members |
 | everything else | — | `401` without a valid token |
 
 - **Swagger UI (dev):** `http://localhost:8080/swagger-ui.html`. The OpenAPI JSON is at `/v3/api-docs`.
@@ -105,7 +110,7 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 ## Tests
 
 ```bash
-./mvnw clean verify     # 105 tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
+./mvnw clean verify     # 137+ tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
 ./mvnw clean package    # tests + executable jar in target/
 ./mvnw dependency:analyze
 ```
@@ -141,7 +146,12 @@ com.aiworkforce.core
 ├── audit/         append-only audit events
 ├── access/        memberships, roles, permissions, tenant check, anti-escalation, member/role endpoints
 ├── organization/  organizations, audit listing
-└── invitation/    invitations (hashed tokens, e-mail delivery, acceptance)
+├── invitation/    invitations (hashed tokens, e-mail delivery, acceptance)
+├── workforce/     shared kernel of the workforce modules: statuses and ports (EmployeeDirectory, EmployeeLifecycleParticipant)
+├── department/    hierarchical departments (cycle-free, archive instead of delete)
+├── position/      job titles (never permissions)
+├── employee/      employee profiles (optional membership link, reporting lines, lifecycle)
+└── team/          teams and member history
 ```
 
 Future business modules (`agent`, `project`…) are sibling packages, following the rules in the architecture document and enforced by `ArchitectureTest`.

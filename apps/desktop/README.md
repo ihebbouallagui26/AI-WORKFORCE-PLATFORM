@@ -2,7 +2,7 @@
 
 Desktop control center for a hybrid human + AI workforce, built with **Angular 22** (standalone components, signals, zoneless) and **Electron 45**.
 
-Since Sprint B1 the desktop signs in with Keycloak (Authorization Code + PKCE in the system browser, driven by the Electron main process) and uses the Core API for the **user profile, organizations, members, roles and invitations**. Agents, projects, communication, supervision and departments still run on **demo data held in memory** (labelled “Demo data”): nothing of these is sent to a server and no AI agent executes anything. See [`docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md`](../../docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md).
+Since Sprint B1 the desktop signs in with Keycloak (Authorization Code + PKCE in the system browser, driven by the Electron main process) and uses the Core API for the **user profile, organizations, members, roles and invitations** and, since Sprint B2, for the **workforce: employees, departments (hierarchy), positions and teams** (Organization section). Agents, projects, communication and supervision still run on **demo data held in memory** (labelled “Demo data”): nothing of these is sent to a server and no AI agent executes anything. See [`docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md`](../../docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md).
 
 ## Layout
 
@@ -63,7 +63,7 @@ npm 11 does not run package install scripts by default. Electron downloads its b
 | Angular dev server for Electron (api mode) | `npm run ui:start` |
 | Desktop app with live reload (Angular dev server + Electron) | `npm run dev` |
 | Desktop app on the production build | `npm start` |
-| All tests (Electron policy + Angular) | `npm test` |
+| All tests (Electron policy + Angular) | `npm test` (Electron main-process tests, then Angular: 64 specs) |
 | Angular unit tests only (Vitest) | `npm run ui:test` |
 | Electron security policy tests only (node:test) | `npm run electron:test` |
 | Production build (Angular + Electron main) | `npm run build` |
@@ -88,6 +88,9 @@ Components never touch data sources directly:
 `provideDataLayer(environment)` binds each abstract API to an implementation. With `dataSource: 'api'` (default) the workspace (`WorkspaceApi`) is backed by the Core API through `IdentityApi` → `BackendClient` → `window.desktop.api` (the main process adds the token); the other domains use the mock implementations through a demo scope (always the demo organization). With `dataSource: 'mock'` (`--configuration mock`, unit tests) everything is in memory and no sign-in is required.
 
 `MessagingApi.incoming$` is the seam for the future WebSocket gateway. The mock never emits on it, and agents never fake a reply.
+
+### Workforce (Sprint B2)
+In `api` mode the **Organization** section (`/organization`) is the real workforce management (`features/workforce`): tabs *Structure* (department tree and detail), *Employees* (search, filters, pagination, department/position/manager/login assignment, status, teams), *Positions* (catalog and holders) and *Teams* (members, leader, department). Data comes from `WorkforceApi` → `BackendClient` → `window.desktop.api`; collections are kept by `WorkforceStore`, keyed by organization through `orgResource`, which tags every result with its organization and only exposes it while that organization is current (an answer arriving after an organization switch is never shown). Actions are shown according to the permissions the API reports for the current organization (`employee.*`, `department.*`, `position.*`, `team.*`); the API enforces them again. The Phase A demo Organization page remains for the `mock` build and the unit tests, and AI agents stay demo data (Phase B3).
 
 ### State
 Every list is organization-scoped: switching organization (sidebar → Workspace) reloads all stores. Responses of the previous organization are discarded.

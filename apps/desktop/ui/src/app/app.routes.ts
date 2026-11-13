@@ -1,5 +1,7 @@
+import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
 import { authGuard, signedOutGuard } from './core/auth/auth.guard';
+import { AUTH_REQUIRED } from './core/auth/session.service';
 import { MainLayout } from './layout/main-layout/main-layout';
 
 /**
@@ -36,8 +38,12 @@ export const routes: Routes = [
         path: 'organization',
         title: 'Organization',
         data: { title: 'Organization' },
+        // With the Core API (api mode) the organization section is the real workforce management;
+        // the in-memory demo page is kept for the mock build and the unit tests.
         loadComponent: () =>
-          import('./features/organization/organization-page').then((m) => m.OrganizationPage),
+          inject(AUTH_REQUIRED)
+            ? import('./features/workforce/workforce-page').then((m) => m.WorkforcePage)
+            : import('./features/organization/organization-page').then((m) => m.OrganizationPage),
       },
       {
         path: 'projects',

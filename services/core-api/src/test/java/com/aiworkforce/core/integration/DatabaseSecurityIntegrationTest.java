@@ -117,7 +117,97 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("2");
+            assertThat(result.targetSchemaVersion).isEqualTo("3");
+        }
+    }
+
+    /**
+     * A B1 database (V1 + V2, with organizations whose built-in roles already exist) upgrades to V3:
+     * the new permissions are granted to the existing OWNER/ADMIN/MEMBER roles, applied
+     * migrations stay valid, and the runtime role keeps data access only.
+     */
+    @Test
+    void upgradesAnExistingB1DatabaseAndBackfillsBuiltInRolePermissions() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("2").migrate();
+
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID owner = UUID.randomUUID();
+            UUID admin = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID custom = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'b1@example.test', true, 'B1', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing B1 organization', '" + user + "', now(), now())");
+                String roles = "INSERT INTO roles (id, organization_id, code, name, built_in, created_at, updated_at) VALUES ";
+                statement.execute(roles + "('" + owner + "', '" + organization + "', 'OWNER', 'Owner', true, now(), now()), ('"
+                        + admin + "', '" + organization + "', 'ADMIN', 'Administrator', true, now(), now()), ('"
+                        + member + "', '" + organization + "', 'MEMBER', 'Member', true, now(), now())");
+                statement.execute("INSERT INTO roles (id, organization_id, name, built_in, created_at, updated_at) VALUES ('"
+                        + custom + "', '" + organization + "', 'Custom auditor', false, now(), now())");
+                // B1 permissions of the built-in roles (and one custom role).
+                for (UUID role : new UUID[] {owner, admin, member}) {
+                    statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                            + role + "', '" + organization + "', 'organization.read')");
+                }
+                statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                        + custom + "', '" + organization + "', 'audit.read')");
+            }
+
+            // V1 and V2 stay valid and V3 applies on top of the existing data.
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("3");
+
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword())) {
+                assertThat(countPermissions(connection, owner, "(employee|department|position|team)[.]")).isEqualTo(10);
+                assertThat(countPermissions(connection, admin, "(employee|department|position|team)[.]")).isEqualTo(10);
+                // MEMBER only gets the read permissions.
+                assertThat(countPermissions(connection, member, "(employee|department|position|team)[.]")).isEqualTo(4);
+                assertThat(countPermissions(connection, member, "[.](create|manage|deactivate)$")).isZero();
+                // Custom roles are never widened by a migration.
+                assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
+            }
+            // Validation (checksums of V1..V3) still passes, and the runtime role has data access only.
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM employee_profiles");
+                statement.execute("INSERT INTO teams (id, organization_id, name, created_at, updated_at) VALUES ('"
+                        + UUID.randomUUID() + "', '" + organization + "', 'Runtime team', now(), now())");
+                assertThatThrownBy(() -> statement.execute("CREATE TABLE intruder (id int)"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE departments ADD COLUMN x int"))
+                        .isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    private static int countPermissions(java.sql.Connection connection, UUID role, String regex) throws Exception {
+        try (java.sql.PreparedStatement statement = connection.prepareStatement(
+                "SELECT count(*) FROM role_permissions WHERE role_id = ? AND permission_code ~ ?")) {
+            statement.setObject(1, role);
+            statement.setString(2, regex);
+            try (java.sql.ResultSet rows = statement.executeQuery()) {
+                rows.next();
+                return rows.getInt(1);
+            }
         }
     }
 

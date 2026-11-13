@@ -91,7 +91,7 @@ Mapping between entities and DTOs is explicit: hand-written mappers or records. 
 
 ## 4. Multi-tenancy strategy
 
-> Implemented in Sprint B1: see [MULTI_TENANCY_ARCHITECTURE.md](MULTI_TENANCY_ARCHITECTURE.md). Modules now present: `identity`, `auth`, `audit`, `access`, `organization`, `invitation`.
+> Implemented in Sprint B1: see [MULTI_TENANCY_ARCHITECTURE.md](MULTI_TENANCY_ARCHITECTURE.md). Modules now present: `identity`, `auth`, `audit`, `access`, `organization`, `invitation`; Sprint B2 adds `workforce` (shared kernel), `department`, `position`, `employee` and `team` ([WORKFORCE_MANAGEMENT_ARCHITECTURE.md](WORKFORCE_MANAGEMENT_ARCHITECTURE.md)). The modules use a flat layout (entity, package-private repository, service, controller per package) instead of the `api/application/domain/persistence` sub-packages sketched above, so that module encapsulation is enforced by the compiler.
 
 Shared database, shared schema, **`organization_id` on every organization-owned row**.
 

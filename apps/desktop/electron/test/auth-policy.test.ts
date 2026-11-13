@@ -110,6 +110,44 @@ describe('resolveApiRequest', () => {
     }
   });
 
+  it('allows the workforce operations of Sprint B2 with strict filters', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const allowed = [
+      { method: 'GET', path: `${base}/employees`, query: { q: 'ines dupont', status: 'ACTIVE', departmentId: ORG, positionId: ORG, managerId: ORG, page: 0, size: 20 } },
+      { method: 'POST', path: `${base}/employees`, body: { displayName: 'x' } },
+      { method: 'PUT', path: `${base}/employees/${ORG}/manager`, body: { managerId: null } },
+      { method: 'PUT', path: `${base}/employees/${ORG}/status`, body: { status: 'INACTIVE' } },
+      { method: 'GET', path: `${base}/departments/tree`, query: { includeArchived: true } },
+      { method: 'PUT', path: `${base}/departments/${ORG}/parent`, body: { parentId: null } },
+      { method: 'DELETE', path: `${base}/departments/${ORG}` },
+      { method: 'POST', path: `${base}/positions/${ORG}/archive`, body: {} },
+      { method: 'GET', path: `${base}/teams/${ORG}/members`, query: { includeFormer: false } },
+      { method: 'DELETE', path: `${base}/teams/${ORG}/members/${ORG}` },
+      { method: 'GET', path: `${base}/employees/${ORG}/teams` },
+    ];
+    for (const request of allowed) {
+      assert.ok(resolveApiRequest(request, API).ok, JSON.stringify(request));
+    }
+  });
+
+  it('refuses workforce requests that are malformed or not part of the API', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const refused = [
+      { method: 'DELETE', path: `${base}/employees/${ORG}` },
+      { method: 'POST', path: `${base}/employees/${ORG}/delete` },
+      { method: 'PUT', path: `${base}/employees/not-a-uuid/manager`, body: {} },
+      { method: 'GET', path: `${base}/employees`, query: { departmentId: 'x; drop table' } },
+      { method: 'GET', path: `${base}/employees`, query: { status: 'active' } },
+      { method: 'GET', path: `${base}/employees`, query: { q: 'a'.repeat(101) } },
+      { method: 'GET', path: `${base}/employees`, query: { q: 'line' + String.fromCharCode(10) + 'break' } },
+      { method: 'GET', path: `${base}/employees`, query: { sort: 'salary' } },
+      { method: 'GET', path: `${base}/salaries` },
+    ];
+    for (const request of refused) {
+      assert.equal(resolveApiRequest(request, API).ok, false, JSON.stringify(request));
+    }
+  });
+
   it('validates bodies', () => {
     assert.equal(resolveApiRequest('GET /api/v1/me', API).ok, false);
     assert.equal(resolveApiRequest({ method: 'GET', path: '/api/v1/me', body: { a: 1 } }, API).ok, false);

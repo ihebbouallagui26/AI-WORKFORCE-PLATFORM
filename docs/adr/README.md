@@ -15,5 +15,7 @@ Short records of significant decisions: context, decision, consequences. An acce
 | [0009](ADR-0009-tenant-isolation-by-membership.md) | Tenant isolation by membership check and organization-scoped repositories | Accepted |
 | [0010](ADR-0010-desktop-oidc-in-main-process.md) | Desktop OIDC in the Electron main process, API calls proxied over IPC | Accepted |
 | [0011](ADR-0011-database-privilege-separation.md) | Separate database roles for migrations, runtime and Keycloak | Accepted |
+| [0012](ADR-0012-workforce-domain-model-and-module-ports.md) | Workforce domain model and module boundaries (shared-kernel ports) | Accepted |
+| [0013](ADR-0013-employee-onboarding-after-invitation.md) | Employee onboarding as a separate step after invitation acceptance | Accepted |
 
 Template: `# ADR-NNNN — Title` · Status · Date · Context · Decision · Consequences · Alternatives considered.

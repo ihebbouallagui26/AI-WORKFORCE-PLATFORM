@@ -93,6 +93,42 @@ public class MembershipService {
                 && memberships.existsByOrganizationIdAndUserIdInAndStatusIn(organizationId, userIds, VISIBLE_STATUSES);
     }
 
+    /** Link of an employee profile to a platform membership (read model for the workforce modules). */
+    public record MemberLink(UUID membershipId, UUID userId, Membership.Status status, String email,
+            String displayName) {
+    }
+
+    /** Memberships of the organization by id (any status), for display next to employee profiles. */
+    @Transactional(readOnly = true)
+    public Map<UUID, MemberLink> linksOf(UUID organizationId, Collection<UUID> membershipIds) {
+        if (membershipIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Membership> found = memberships.findByOrganizationIdAndIdIn(organizationId, membershipIds);
+        Map<UUID, UserSummary> profiles = users.findByIds(found.stream().map(Membership::getUserId).toList());
+        return found.stream().collect(Collectors.toMap(Membership::getId, m -> {
+            UserSummary profile = profiles.get(m.getUserId());
+            return new MemberLink(m.getId(), m.getUserId(), m.getStatus(),
+                    profile == null ? null : profile.email(), profile == null ? null : profile.displayName());
+        }));
+    }
+
+    /**
+     * A membership an employee profile may be linked to: it must belong to the organization (404
+     * otherwise, whatever the caller supplied) and must not be removed (409).
+     */
+    @Transactional(readOnly = true)
+    public MemberLink requireLinkable(UUID organizationId, UUID membershipId) {
+        MemberLink link = linksOf(organizationId, List.of(membershipId)).get(membershipId);
+        if (link == null) {
+            throw new ResourceNotFoundException("member");
+        }
+        if (link.status() == Membership.Status.REMOVED) {
+            throw new ConflictException("This member was removed from the organization.");
+        }
+        return link;
+    }
+
     // ------------------------------------------------------------------ commands
 
     @Transactional
