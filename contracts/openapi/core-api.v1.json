@@ -12,6 +12,9 @@
     "name" : "Invitations",
     "description" : "Invitations to join an organization"
   }, {
+    "name" : "Internal (orchestrator)",
+    "description" : "Service account only. Not for the desktop application."
+  }, {
     "name" : "Skills and tools",
     "description" : "Reusable skills and the tool registry (metadata, no execution)"
   }, {
@@ -4010,6 +4013,42 @@
         }
       }
     },
+    "/api/v1/internal/organizations/{organizationId}/agents/{agentId}/execution-context" : {
+      "get" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "Authorized configuration of an ACTIVE agent for execution (no secrets)",
+        "operationId" : "getAgentExecutionContext",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentExecutionContext"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health" : {
       "get" : {
         "tags" : [ "Health" ],
@@ -6352,6 +6391,122 @@
           "totalPages" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "AgentExecutionContext" : {
+        "type" : "object",
+        "properties" : {
+          "organizationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "handle" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "DRAFT", "ACTIVE", "PAUSED", "ARCHIVED" ]
+          },
+          "configVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "systemInstructions" : {
+            "type" : "string"
+          },
+          "providers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ExecutionProviderBinding"
+            }
+          },
+          "tools" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ExecutionToolPermission"
+            }
+          },
+          "skills" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "memory" : {
+            "$ref" : "#/components/schemas/ExecutionMemorySettings"
+          }
+        }
+      },
+      "ExecutionMemorySettings" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "scope" : {
+            "type" : "string",
+            "enum" : [ "PROJECT", "ORGANIZATION" ]
+          },
+          "accessMode" : {
+            "type" : "string",
+            "enum" : [ "AGENT_ONLY", "TEAM_MEMBERS", "ORGANIZATION_MEMBERS" ]
+          },
+          "retentionDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ExecutionProviderBinding" : {
+        "type" : "object",
+        "properties" : {
+          "connectionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "providerType" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
+          },
+          "modelId" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "PRIMARY", "FALLBACK" ]
+          },
+          "priority" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ExecutionToolPermission" : {
+        "type" : "object",
+        "properties" : {
+          "toolCode" : {
+            "type" : "string"
+          },
+          "level" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "approvalRequired" : {
+            "type" : "boolean"
+          },
+          "mcpServer" : {
+            "type" : "string"
+          },
+          "mcpTool" : {
+            "type" : "string"
           }
         }
       },

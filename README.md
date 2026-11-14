@@ -7,7 +7,7 @@ Platform for running virtual organizations staffed by human employees and superv
 | [`apps/desktop`](apps/desktop/README.md) | Desktop application (Angular + Electron) | Phase A: UI on mock data |
 | `apps/vscode-extension` | VS Code extension | Not started |
 | [`services/core-api`](services/core-api/README.md) | Core backend (Java 21, Spring Boot 4) | Sprint B0: foundation (no business endpoints, no authentication yet) |
-| `services/ai-orchestrator` | AI orchestration engine (Python, FastAPI, LangGraph) | Not started |
+| [`services/ai-orchestrator`](services/ai-orchestrator/README.md) | AI orchestration engine (Python, FastAPI, LangGraph, MCP) | Phase C0: secure foundation (no agent execution yet) |
 | `services/local-runner` | Local model runner | Not started |
 | [`contracts/openapi`](contracts/openapi/README.md) | OpenAPI contracts | Core API v1 (health) |
 | `contracts/events` | Event contracts | Not started |
@@ -37,4 +37,5 @@ cd services/core-api && ./mvnw spring-boot:run      # http://localhost:8080/api/
 - [Security architecture](docs/architecture/SECURITY_ARCHITECTURE.md)
 - [Architecture decision records](docs/adr/README.md)
 - [Database conventions](docs/database/DATABASE_CONVENTIONS.md)
-- Reports: [Phase A audit](docs/PHASE_A_TECHNICAL_AUDIT.md) · [Sprint B0](docs/SPRINT_B0_IMPLEMENTATION_REPORT.md)
+- AI orchestration: [architecture](docs/architecture/AI_ORCHESTRATION_ARCHITECTURE.md) · [providers](docs/architecture/PROVIDER_INTEGRATION_ARCHITECTURE.md) · [MCP](docs/architecture/MCP_INTEGRATION_ARCHITECTURE.md) · [ADR-0016](docs/adr/ADR-0016-orchestrator-service-boundary-and-identity.md)
+- Reports: [Sprint C0](docs/SPRINT_C0_IMPLEMENTATION_REPORT.md) · [Phase A audit](docs/PHASE_A_TECHNICAL_AUDIT.md) · [Sprint B0](docs/SPRINT_B0_IMPLEMENTATION_REPORT.md)

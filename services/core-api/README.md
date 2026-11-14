@@ -67,6 +67,7 @@ The `dev` profile reads `infra/docker/.env` (and an optional `services/core-api/
 | `MAIL_HOST` / `MAIL_PORT` | for invitations | none / `25` | SMTP server (Mailpit locally: `localhost` / `1025`). Without it, invitations answer 503 |
 | `INVITATION_MAIL_FROM` | no | `no-reply@aiworkforce.local` | Sender of invitation e-mails |
 | `SECRETS_MASTER_KEY` | **yes** | none (generated into `infra/docker/.env` by `ensure-env.sh`) | Base64 of 32 random bytes: AES-256-GCM master key of the provider `SecretStore`. Never commit or log it; losing it makes stored credentials unreadable. |
+| `ORCHESTRATOR_CLIENT_ID` | no | `ai-orchestrator` | Keycloak client id (`azp`) of the AI orchestrator service account: accepted on `/api/v1/internal/**` only, refused on every user endpoint. |
 | `APP_CORS_ALLOWED_ORIGINS` | **yes** outside `dev` | `http://localhost:4200` in `dev` only | Comma-separated exact origins. Wildcards are rejected at startup. |
 
 Secrets are never committed: `.env` files are ignored by Git, and only `*.env.example` files with placeholders are versioned.
@@ -106,6 +107,7 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 | `/api/v1/organizations/{id}/providers/connections` (+ `/{id}`, `/credential`, `/test`, `/models`), `GET /api/v1/providers/types` | bearer token + membership + `provider.*` | Provider connections. The credential is write-only and never returned. |
 | `/api/v1/organizations/{id}/skills` (+ `/{id}`), `GET …/tools` | bearer token + membership + `skill.*` | Skill catalog and tool registry |
 | `/api/v1/organizations/{id}/teams/{teamId}/agents` (+ `/{agentId}`) | bearer token + membership + `team.manage` + `agent.read` | AI agents in teams (separate from human members) |
+| `GET /api/v1/internal/organizations/{id}/agents/{agentId}/execution-context` | **service account only** (`ai-orchestrator`) | Read-only, secret-free configuration of an ACTIVE agent for the AI orchestrator |
 | everything else | — | `401` without a valid token |
 
 - **Swagger UI (dev):** `http://localhost:8080/swagger-ui.html`. The OpenAPI JSON is at `/v3/api-docs`.
@@ -116,7 +118,7 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 ## Tests
 
 ```bash
-./mvnw clean verify     # 188 tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
+./mvnw clean verify     # 194 tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
 ./mvnw clean package    # tests + executable jar in target/
 ./mvnw dependency:analyze
 ```

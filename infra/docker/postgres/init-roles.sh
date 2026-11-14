@@ -7,6 +7,9 @@
 #   - DB_APP_USERNAME       : Core API runtime, data access only (SELECT/INSERT/UPDATE/DELETE).
 #   - KEYCLOAK_DB_USERNAME  : owner of the separate Keycloak database, no access to the app database.
 #
+#   - ORCHESTRATOR_DB_*     : (optional, Phase C0) separate database for the AI orchestrator's runtime
+#                             state, owned by its own restricted role with no access to any other database.
+#
 # Passwords are passed as psql variables and quoted with format(%L): no shell interpolation in SQL.
 set -euo pipefail
 
@@ -22,7 +25,11 @@ set -euo pipefail
 : "${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}"
 : "${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}"
 
-psql --no-psqlrc -v ON_ERROR_STOP=1 --dbname "$APP_DB_NAME" \
+ORCH_DB_NAME="${ORCHESTRATOR_DB_NAME:-}"
+ORCH_DB_USERNAME="${ORCHESTRATOR_DB_USERNAME:-}"
+ORCH_DB_PASSWORD="${ORCHESTRATOR_DB_PASSWORD:-}"
+
+psql --no-psqlrc -v ON_ERROR_STOP=1 --dbname "$APP_DB_NAME"   -v orch_db="$ORCH_DB_NAME" -v orch_user="$ORCH_DB_USERNAME" -v orch_password="$ORCH_DB_PASSWORD" \
   -v app_db="$APP_DB_NAME" \
   -v migrator="$DB_MIGRATION_USERNAME" -v migrator_password="$DB_MIGRATION_PASSWORD" \
   -v app="$DB_APP_USERNAME" -v app_password="$DB_APP_PASSWORD" \
@@ -41,6 +48,16 @@ SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NORE
 SELECT format('CREATE DATABASE %I OWNER %I', :'kc_db', :'kc_user') WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'kc_db') \gexec
 SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'kc_db') \gexec
 SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', :'kc_db', :'kc_user') \gexec
+
+-- 2a. AI orchestrator runtime state (optional): own database, own role, no access elsewhere.
+SELECT format('CREATE ROLE %I LOGIN', :'orch_user')
+  WHERE :'orch_user' <> '' AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'orch_user') \gexec
+SELECT format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD %L', :'orch_user', :'orch_password')
+  WHERE :'orch_user' <> '' AND :'orch_password' <> '' \gexec
+SELECT format('CREATE DATABASE %I OWNER %I', :'orch_db', :'orch_user')
+  WHERE :'orch_user' <> '' AND :'orch_db' <> '' AND NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'orch_db') \gexec
+SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'orch_db') WHERE :'orch_db' <> '' \gexec
+SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', :'orch_db', :'orch_user') WHERE :'orch_db' <> '' AND :'orch_user' <> '' \gexec
 
 -- 2b. Extensions need superuser rights, which the migration role deliberately lacks: they are
 --     provisioned here (a DBA step on managed databases). V1's CREATE EXTENSION IF NOT EXISTS

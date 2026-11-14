@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AgentsApi } from '../../core/agents/agents.api';
 import { ProviderConnection, ProviderType } from '../../core/agents/agents.models';
@@ -100,7 +100,9 @@ const CREDENTIAL = /^[!-~]{8,512}$/;
         }
         <div class="field field--full">
           <label class="field__label" for="pc-credential">API key<span class="field__required" aria-hidden="true">*</span></label>
-          <input id="pc-credential" class="input" type="password" formControlName="credential" autocomplete="new-password" spellcheck="false" />
+          <input id="pc-credential" class="input" type="password" formControlName="credential" autocomplete="new-password"
+            autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text"
+            data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           @if (error('credential', 'API key'); as message) { <span class="field__error">{{ message }}</span> }
         </div>
       </form>
@@ -132,6 +134,8 @@ export class ProvidersTab {
   protected readonly statusTone = CONNECTION_STATUS_TONE;
   protected readonly types: readonly ProviderType[] = ['ANTHROPIC', 'OPENAI', 'GEMINI'];
 
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly creating = signal(false);
   protected readonly target = signal<ProviderConnection | null>(null);
   protected readonly saving = signal(false);
@@ -143,6 +147,31 @@ export class ProvidersTab {
     accountIdentifier: ['', Validators.maxLength(120)],
     credential: ['', [Validators.required, Validators.pattern(CREDENTIAL)]],
   });
+
+  constructor() {
+    // The typed key does not outlive the moment it is needed: it is wiped when the window loses focus,
+    // when the page is hidden and when the component is destroyed (it is also wiped on close and submit).
+    const wipe = () => {
+      this.form.controls.credential.reset('');
+      // Also clear the DOM node itself: it can outlive the view (detached, awaiting garbage collection).
+      const input = this.host.nativeElement.querySelector<HTMLInputElement>('#pc-credential');
+      if (input) {
+        input.value = '';
+      }
+    };
+    const hidden = () => {
+      if (document.visibilityState === 'hidden') {
+        wipe();
+      }
+    };
+    window.addEventListener('blur', wipe);
+    document.addEventListener('visibilitychange', hidden);
+    this.destroyRef.onDestroy(() => {
+      window.removeEventListener('blur', wipe);
+      document.removeEventListener('visibilitychange', hidden);
+      wipe();
+    });
+  }
 
   protected openCreate(): void {
     this.form.reset({ providerType: 'ANTHROPIC', displayName: '', accountIdentifier: '', credential: '' });
@@ -175,17 +204,19 @@ export class ProvidersTab {
     if (relevant.some((control) => control.invalid) || this.saving()) {
       return;
     }
-    const value = this.form.getRawValue();
+    // Move the key out of the form immediately: only this local variable holds it during the request.
+    const { credential: secret, ...value } = this.form.getRawValue();
+    credential.reset('');
     this.saving.set(true);
     try {
       const saved = await this.store.mutate((organizationId) =>
         replacing
-          ? this.api.replaceCredential(organizationId, replacing.id, value.credential)
+          ? this.api.replaceCredential(organizationId, replacing.id, secret)
           : this.api.createConnection(organizationId, {
               providerType: value.providerType,
               displayName: value.displayName.trim(),
               ...(value.accountIdentifier.trim() ? { accountIdentifier: value.accountIdentifier.trim() } : {}),
-              credential: value.credential,
+              credential: secret,
             }),
       );
       this.toast.success(replacing ? 'Credential replaced' : 'Provider connected', `${saved.displayName} is not validated yet.`);

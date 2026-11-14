@@ -19,5 +19,6 @@ Short records of significant decisions: context, decision, consequences. An acce
 | [0013](ADR-0013-employee-onboarding-after-invitation.md) | Employee onboarding as a separate step after invitation acceptance | Accepted |
 | [0014](ADR-0014-agent-domain-and-module-ports.md) | AI agent domain, separate from users and employees, wired through ports | Accepted |
 | [0015](ADR-0015-secret-store-and-provider-adapters.md) | SecretStore abstraction and fixed-endpoint provider adapters | Accepted |
+| [0016](ADR-0016-orchestrator-service-boundary-and-identity.md) | Python orchestrator behind a service boundary, with its own identity and runtime database | Accepted |
 
 Template: `# ADR-NNNN — Title` · Status · Date · Context · Decision · Consequences · Alternatives considered.

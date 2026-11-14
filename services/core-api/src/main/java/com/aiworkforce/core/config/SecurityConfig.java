@@ -2,14 +2,22 @@ package com.aiworkforce.core.config;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import com.aiworkforce.core.auth.OrchestratorProperties;
 import jakarta.servlet.DispatcherType;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.InvalidBearerTokenException;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -44,7 +52,11 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 @Configuration(proxyBeanMethods = false)
 @EnableWebSecurity
 @EnableMethodSecurity
+@EnableConfigurationProperties(OrchestratorProperties.class)
 public class SecurityConfig {
+
+    /** Authority given only to the orchestrator's service account, on {@code /api/v1/internal/**} only. */
+    static final String ORCHESTRATOR_AUTHORITY = "ROLE_ORCHESTRATOR";
 
     /** Operational endpoints readable without authentication (no sensitive details exposed). */
     private static final String[] PUBLIC_ACTUATOR_PATHS = {"/actuator/health", "/actuator/health/**", "/actuator/info"};
@@ -55,12 +67,72 @@ public class SecurityConfig {
     /** Restrictive CSP for API responses (JSON only, never rendered as a document). */
     private static final String API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'";
 
+    /**
+     * Service-to-service surface ({@code /api/v1/internal/**}): reachable only with a service-account
+     * token whose authorized party is the orchestrator client. It has no user, no membership and no
+     * organization authority of its own: each internal endpoint validates the organization it is asked about.
+     */
     @Bean
+    @Order(1)
+    SecurityFilterChain internalSecurityFilterChain(
+            HttpSecurity http,
+            @Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver,
+            OrchestratorProperties orchestrator) throws Exception {
+        http.securityMatcher("/api/v1/internal/**");
+        applyStatelessBaseline(http);
+        http
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().hasAuthority(ORCHESTRATOR_AUTHORITY))
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(serviceAccountConverter(orchestrator.clientId())))
+                        .authenticationEntryPoint((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex))
+                        .accessDeniedHandler((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex)))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex))
+                        .accessDeniedHandler((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex)));
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     SecurityFilterChain apiSecurityFilterChain(
             HttpSecurity http,
             @Qualifier("handlerExceptionResolver") HandlerExceptionResolver exceptionResolver,
-            @Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled) throws Exception {
+            @Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled,
+            OrchestratorProperties orchestrator) throws Exception {
 
+        applyStatelessBaseline(http);
+        http
+                .authorizeHttpRequests(authorize -> {
+                    // Error dispatches carry the original request's authorization decision.
+                    authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll();
+                    authorize.requestMatchers(HttpMethod.GET, PUBLIC_ACTUATOR_PATHS).permitAll();
+                    if (apiDocsEnabled) {
+                        authorize.requestMatchers(HttpMethod.GET, API_DOCS_PATHS).permitAll();
+                    }
+                    authorize.anyRequest().authenticated();
+                })
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(accessTokenAuthenticationConverter(orchestrator.clientId())))
+                        .authenticationEntryPoint((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex))
+                        .accessDeniedHandler((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex)))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex))
+                        .accessDeniedHandler((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex)));
+
+        return http.build();
+    }
+
+    /** Stateless, CSRF-free, bearer-only baseline shared by both filter chains. */
+    private static void applyStatelessBaseline(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(withDefaults())
@@ -76,36 +148,31 @@ public class SecurityConfig {
                         .referrerPolicy(referrer -> referrer.policy(ReferrerPolicy.NO_REFERRER))
                         .addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
                                 new NegatedRequestMatcher(matchers(API_DOCS_PATHS)),
-                                new StaticHeadersWriter("Content-Security-Policy", API_CONTENT_SECURITY_POLICY))))
-                .authorizeHttpRequests(authorize -> {
-                    // Error dispatches carry the original request's authorization decision.
-                    authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll();
-                    authorize.requestMatchers(HttpMethod.GET, PUBLIC_ACTUATOR_PATHS).permitAll();
-                    if (apiDocsEnabled) {
-                        authorize.requestMatchers(HttpMethod.GET, API_DOCS_PATHS).permitAll();
-                    }
-                    authorize.anyRequest().authenticated();
-                })
-                .oauth2ResourceServer(resourceServer -> resourceServer
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(accessTokenAuthenticationConverter()))
-                        .authenticationEntryPoint((request, response, ex) ->
-                                exceptionResolver.resolveException(request, response, null, ex))
-                        .accessDeniedHandler((request, response, ex) ->
-                                exceptionResolver.resolveException(request, response, null, ex)))
-                .exceptionHandling(exceptions -> exceptions
-                        .authenticationEntryPoint((request, response, ex) ->
-                                exceptionResolver.resolveException(request, response, null, ex))
-                        .accessDeniedHandler((request, response, ex) ->
-                                exceptionResolver.resolveException(request, response, null, ex)));
-
-        return http.build();
+                                new StaticHeadersWriter("Content-Security-Policy", API_CONTENT_SECURITY_POLICY))));
     }
 
-    /** Authorities are never derived from token claims (roles live in the database, per organization). */
-    private static JwtAuthenticationConverter accessTokenAuthenticationConverter() {
+    /**
+     * User tokens: authorities are never derived from token claims (roles live in the database, per
+     * organization). Tokens of the orchestrator service account are refused here: they belong to
+     * {@code /api/v1/internal/**} and must never be provisioned as a human user.
+     */
+    private static Converter<Jwt, AbstractAuthenticationToken> accessTokenAuthenticationConverter(String serviceClientId) {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(jwt -> List.of());
+        return jwt -> {
+            if (serviceClientId.equals(jwt.getClaimAsString("azp"))) {
+                throw new InvalidBearerTokenException("Service account tokens are not accepted on this endpoint");
+            }
+            return converter.convert(jwt);
+        };
+    }
+
+    /** Service account tokens: one authority, only when the authorized party is the orchestrator client. */
+    private static Converter<Jwt, AbstractAuthenticationToken> serviceAccountConverter(String serviceClientId) {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> serviceClientId.equals(jwt.getClaimAsString("azp"))
+                ? List.of(new SimpleGrantedAuthority(ORCHESTRATOR_AUTHORITY))
+                : List.of());
         return converter;
     }
 

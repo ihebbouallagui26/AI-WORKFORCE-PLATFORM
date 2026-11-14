@@ -92,6 +92,15 @@ public class TestIdentityProvider {
             return this;
         }
 
+        /** A service-account token (client credentials): authorized party is the client, no e-mail, no name. */
+        public Token serviceAccount(String clientId) {
+            claims.claim("azp", clientId);
+            claims.claim("email", null);
+            claims.claim("email_verified", null);
+            claims.claim("name", null);
+            return this;
+        }
+
         public Token emailVerified(boolean verified) {
             claims.claim("email_verified", verified);
             return this;
