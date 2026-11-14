@@ -24,8 +24,11 @@ import {
   ProviderTypeInfo,
   Skill,
   TeamAgent,
+  ApprovalStatus,
+  ToolApproval,
   ToolDefinition,
   ToolGrantInput,
+  ToolInvocation,
 } from './agents.models';
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -116,6 +119,37 @@ export class AgentsApi {
 
   getExecution(organizationId: string, executionId: string): Promise<AgentExecution> {
     return this.http.get(`${org(organizationId)}/executions/${uuid(executionId)}`);
+  }
+
+  // ---------------------------------------------------------------- tool calls and approvals (Sprint C2)
+
+  /** Tool calls of one execution, in order (a page: it is never a plain array). */
+  executionToolCalls(organizationId: string, executionId: string, page = 0, size = 50): Promise<Page<ToolInvocation>> {
+    return this.http.get(`${org(organizationId)}/executions/${uuid(executionId)}/tool-calls`, { page, size });
+  }
+
+  listApprovals(
+    organizationId: string,
+    query: { status?: ApprovalStatus; executionId?: string; page?: number; size?: number } = {},
+  ): Promise<Page<ToolApproval>> {
+    if (query.executionId !== undefined) {
+      uuid(query.executionId);
+    }
+    return this.http.get(`${org(organizationId)}/approvals`, clean({ size: 20, ...query }));
+  }
+
+  getApproval(organizationId: string, approvalId: string): Promise<ToolApproval> {
+    return this.http.get(`${org(organizationId)}/approvals/${uuid(approvalId)}`);
+  }
+
+  /** Approves exactly the reviewed call: the server checks the hash of the arguments that were shown. */
+  approve(organizationId: string, approvalId: string, argumentsHash: string): Promise<ToolApproval> {
+    return this.http.post(`${org(organizationId)}/approvals/${uuid(approvalId)}/approve`, { argumentsHash });
+  }
+
+  reject(organizationId: string, approvalId: string, reason?: string): Promise<ToolApproval> {
+    const trimmed = reason?.trim();
+    return this.http.post(`${org(organizationId)}/approvals/${uuid(approvalId)}/reject`, trimmed ? { reason: trimmed } : {});
   }
 
   // ---------------------------------------------------------------- configuration

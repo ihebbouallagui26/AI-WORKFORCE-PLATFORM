@@ -150,7 +150,11 @@ class AgentConfigurationIntegrationTest extends AgentFlows {
         UUID org = createOrganization(owner, "Tools");
         UUID agent = agent(owner, org, "Tooled");
 
-        getAs(owner, path(org, "/tools")).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(6)))
+        getAs(owner, path(org, "/tools")).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(9)))
+                // The B3 placeholders cannot run (policy DENIED); the three reference tools of the local diagnostic MCP server can.
+                .andExpect(jsonPath("$[?(@.code == 'docs.search')].executionPolicy").value("DENIED"))
+                .andExpect(jsonPath("$[?(@.code == 'diagnostic.echo')].executionPolicy").value("READ_ONLY"))
+                .andExpect(jsonPath("$[?(@.code == 'diagnostic.record_note')].executionPolicy").value("APPROVAL_REQUIRED"))
                 .andExpect(jsonPath("$[?(@.code == 'git.access')].risk").value("HIGH"))
                 .andExpect(jsonPath("$[?(@.code == 'project.files.read')].mcpServer").value("filesystem"));
         // Least privilege: a new agent has no tool at all.

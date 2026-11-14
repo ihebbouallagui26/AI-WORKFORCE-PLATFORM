@@ -29,6 +29,20 @@ class Accepted(BaseModel):
     status: Literal["ACCEPTED"] = "ACCEPTED"
 
 
+@router.post("/resume", status_code=status.HTTP_202_ACCEPTED, response_model=Accepted)
+async def resume_execution(request: Request, body: ExecutionRequest, caller: Caller) -> Accepted:
+    """The Core API says a human decided the pending tool approval of this execution: continue it.
+
+    Identifiers only, and idempotent: a duplicate or late notification is refused by the Core API (once per
+    pause) and does nothing here. It may be sent again until the run takes the decision into account."""
+    runner = request.app.state.executor
+    if runner is None:
+        raise UnavailableError("Execution is not available: the runtime is not configured.")
+    runner.submit(body.organizationId, body.executionId, resume=True)
+    log.info("execution_resume_accepted", execution_id=str(body.executionId), caller=caller.client_id)
+    return Accepted()
+
+
 @router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=Accepted)
 async def submit_execution(request: Request, body: ExecutionRequest, caller: Caller) -> Accepted:
     runner = request.app.state.executor

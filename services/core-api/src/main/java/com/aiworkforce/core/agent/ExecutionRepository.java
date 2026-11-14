@@ -35,15 +35,20 @@ interface ExecutionRepository extends JpaRepository<AgentExecution, UUID> {
     @Query("""
             select count(e) from AgentExecution e
             where e.organizationId = :organizationId and e.status in (
-                com.aiworkforce.core.agent.ExecutionStatus.PENDING, com.aiworkforce.core.agent.ExecutionStatus.RUNNING)""")
+                com.aiworkforce.core.agent.ExecutionStatus.PENDING, com.aiworkforce.core.agent.ExecutionStatus.RUNNING,
+                com.aiworkforce.core.agent.ExecutionStatus.WAITING_APPROVAL)""")
     long countOpenByOrganization(@Param("organizationId") UUID organizationId);
 
-    /** Open executions older than the cut-off, across organizations (system maintenance only). */
+    /**
+     * Executions that are PENDING or RUNNING and have shown no activity since the cut-off, across
+     * organizations (system maintenance only). An execution WAITING_APPROVAL is deliberately not listed:
+     * it waits for a human, and its own deadline is the approval expiry.
+     */
     @Query("""
             select e from AgentExecution e
             where e.status in (com.aiworkforce.core.agent.ExecutionStatus.PENDING,
                                com.aiworkforce.core.agent.ExecutionStatus.RUNNING)
-              and e.createdAt < :cutoff
-            order by e.createdAt""")
+              and e.updatedAt < :cutoff
+            order by e.updatedAt""")
     List<AgentExecution> findStaleOpenExecutionsOrganizationWide(@Param("cutoff") Instant cutoff, Pageable limit);
 }

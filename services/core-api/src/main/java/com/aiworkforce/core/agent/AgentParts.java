@@ -241,6 +241,26 @@ public final class AgentParts {
         @Column(nullable = false)
         private boolean enabled;
 
+        @Column(name = "input_schema", nullable = false)
+        private String inputSchema;
+
+        @Enumerated(EnumType.STRING)
+        @Column(name = "execution_policy", nullable = false)
+        private ToolPolicy executionPolicy;
+
+        @Enumerated(EnumType.STRING)
+        @Column(name = "required_level", nullable = false)
+        private ToolLevel requiredLevel;
+
+        @Column(name = "timeout_seconds", nullable = false)
+        private int timeoutSeconds;
+
+        @Column(name = "max_output_bytes", nullable = false)
+        private int maxOutputBytes;
+
+        @Column(name = "policy_version", nullable = false)
+        private int policyVersion;
+
         protected ToolDefinition() {
         }
 
@@ -253,6 +273,12 @@ public final class AgentParts {
         public String getMcpServer() { return mcpServer; }
         public String getMcpTool() { return mcpTool; }
         public boolean isEnabled() { return enabled; }
+        public String getInputSchema() { return inputSchema; }
+        public ToolPolicy getExecutionPolicy() { return executionPolicy; }
+        public ToolLevel getRequiredLevel() { return requiredLevel; }
+        public int getTimeoutSeconds() { return timeoutSeconds; }
+        public int getMaxOutputBytes() { return maxOutputBytes; }
+        public int getPolicyVersion() { return policyVersion; }
     }
 
     @Entity(name = "ToolGrant")

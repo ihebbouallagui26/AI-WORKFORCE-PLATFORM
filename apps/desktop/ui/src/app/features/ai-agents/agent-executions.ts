@@ -9,23 +9,26 @@ import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { Panel } from '../../shared/components/panel/panel';
 import { Skeleton } from '../../shared/components/skeleton/skeleton';
 import { Tone } from '../../shared/utils/presentation';
+import { ExecutionActivity } from './execution-activity';
 
 export const MAX_TASK_LENGTH = 8000;
 export const POLL_INTERVAL_MS = 2000;
 /** Polling period (overridable so tests do not wait seconds). */
 export const EXECUTION_POLL_MS = new InjectionToken<number>('EXECUTION_POLL_MS', { providedIn: 'root', factory: () => POLL_INTERVAL_MS });
 /** Polling stops after this long even if the run is not final (the server fails stale runs by itself). */
-export const POLL_LIMIT_MS = 10 * 60 * 1000;
+export const POLL_LIMIT_MS = 20 * 60 * 1000;
 
 const STATUS_LABEL: Readonly<Record<AgentExecution['status'], string>> = {
   PENDING: 'Queued',
   RUNNING: 'Running',
+  WAITING_APPROVAL: 'Needs approval',
   SUCCEEDED: 'Succeeded',
   FAILED: 'Failed',
 };
 const STATUS_TONE: Readonly<Record<AgentExecution['status'], Tone>> = {
   PENDING: 'neutral',
   RUNNING: 'info',
+  WAITING_APPROVAL: 'warning',
   SUCCEEDED: 'success',
   FAILED: 'danger',
 };
@@ -37,10 +40,10 @@ const STATUS_TONE: Readonly<Record<AgentExecution['status'], Tone>> = {
  */
 @Component({
   selector: 'app-agent-executions',
-  imports: [Panel, Badge, EmptyState, Skeleton],
+  imports: [Panel, Badge, EmptyState, Skeleton, ExecutionActivity],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ui-panel heading="Run this agent" subheading="Supervised run: you give an instruction and launch it. Text only, no tools are used.">
+    <ui-panel heading="Run this agent" subheading="Supervised run: you give an instruction and launch it. The agent uses only the tools it was granted, and sensitive actions wait for a person's approval.">
       @if (!store.can('agent.execute')) {
         <p class="text-tertiary">Your role does not allow launching agent executions.</p>
       } @else if (blocker(); as reason) {
@@ -65,14 +68,19 @@ const STATUS_TONE: Readonly<Record<AgentExecution['status'], Tone>> = {
             <ui-badge [label]="statusLabel[run.status]" [tone]="statusTone[run.status]" />
             <span class="text-tertiary">{{ run.providerType }} · {{ run.modelId }}</span>
           </header>
-          @if (run.status === 'PENDING' || run.status === 'RUNNING') {
-            <p class="text-tertiary">The agent is working on your instruction…</p>
+          @if (run.status === 'PENDING') {
+            <p class="text-tertiary">The execution is registered and waiting to start…</p>
+          } @else if (run.status === 'RUNNING') {
+            <p class="text-tertiary">The agent is working on your instruction and may use the tools it was granted…</p>
+          } @else if (run.status === 'WAITING_APPROVAL') {
+            <p class="text-tertiary" data-testid="exec-waiting">The run is paused: a person must approve or reject a tool action below.</p>
           } @else if (run.status === 'SUCCEEDED') {
             <pre class="result" data-testid="exec-result">{{ run.result }}</pre>
             <p class="text-tertiary">{{ usage(run) }}</p>
           } @else {
             <p class="error" role="alert" data-testid="exec-error">{{ run.errorMessage || 'The execution failed.' }}</p>
           }
+          <app-execution-activity [run]="run" (changed)="refreshNow()" />
         </section>
       }
     </ui-panel>
@@ -135,6 +143,7 @@ export class AgentExecutions {
   protected readonly current = signal<AgentExecution | null>(null);
   private timer: ReturnType<typeof setTimeout> | null = null;
   private pollStartedAt = 0;
+  private autoSelected = false;
 
   protected readonly history = orgResource(
     this.store.organizationId,
@@ -177,6 +186,20 @@ export class AgentExecutions {
       this.detail().agent.id;
       this.store.organizationId();
       untracked(() => this.reset());
+    });
+    // After an app reload nothing is kept on the client: a run that still needs attention is recovered from the API.
+    effect(() => {
+      const list = this.history.value()?.content;
+      untracked(() => {
+        if (this.autoSelected || this.current() !== null || !Array.isArray(list)) {
+          return;
+        }
+        this.autoSelected = true;
+        const open = list.find((item) => !isTerminal(item.status));
+        if (open) {
+          this.select(open);
+        }
+      });
     });
     inject(DestroyRef).onDestroy(() => this.stopPolling());
   }
@@ -230,7 +253,16 @@ export class AgentExecutions {
     return this.store.organizationId() === organizationId && this.detail().agent.id === agentId;
   }
 
-  private poll(executionId: string): void {
+  /** A decision was just recorded: read the run now instead of waiting for the next tick. */
+  protected refreshNow(): void {
+    const run = this.current();
+    if (run && !isTerminal(run.status)) {
+      this.poll(run.id, 0);
+    }
+    this.history.reload();
+  }
+
+  private poll(executionId: string, firstDelay = this.pollMs): void {
     this.stopPolling();
     this.pollStartedAt = Date.now();
     const tick = async (): Promise<void> => {
@@ -257,7 +289,7 @@ export class AgentExecutions {
         this.timer = setTimeout(() => void tick(), this.pollMs);
       }
     };
-    this.timer = setTimeout(() => void tick(), this.pollMs);
+    this.timer = setTimeout(() => void tick(), firstDelay);
   }
 
   private stopPolling(): void {
@@ -273,5 +305,6 @@ export class AgentExecutions {
     this.current.set(null);
     this.launchError.set(null);
     this.starting.set(false);
+    this.autoSelected = false;
   }
 }

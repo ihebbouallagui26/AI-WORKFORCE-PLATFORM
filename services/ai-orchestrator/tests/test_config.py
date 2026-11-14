@@ -40,7 +40,10 @@ def test_production_requires_https_secret_and_database():
         Settings(**base, client_secret=SecretStr("s"))
     with pytest.raises(ValidationError, match="HTTPS"):
         Settings(**{**base, "core_api_base_url": "http://core.example.com"}, client_secret=SecretStr("s"), database_url=SecretStr("postgresql://x"))
-    assert Settings(**base, client_secret=SecretStr("s"), database_url=SecretStr("postgresql://x")).environment == "prod"
+    with pytest.raises(ValidationError, match="STATE_ENCRYPTION_KEY"):
+        Settings(**base, client_secret=SecretStr("s"), database_url=SecretStr("postgresql://x"))
+    key = SecretStr("QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=")  # synthetic: 32 x "A"
+    assert Settings(**base, client_secret=SecretStr("s"), database_url=SecretStr("postgresql://x"), state_encryption_key=key).environment == "prod"
 
 
 def test_provider_endpoints_must_be_https_or_loopback():

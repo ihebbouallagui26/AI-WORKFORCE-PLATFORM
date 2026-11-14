@@ -4,6 +4,7 @@ import com.aiworkforce.core.provider.ProviderType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The authorized, read-only configuration of one ACTIVE agent as needed by the AI orchestrator.
@@ -35,7 +36,8 @@ public record ExecutionContextView(
     /** One approved tool grant, with the MCP server and tool it maps to (if any). */
     @Schema(name = "ExecutionToolPermission")
     public record ToolPermission(String toolCode, ToolLevel level, boolean approvalRequired, String mcpServer,
-            String mcpTool) {
+            String mcpTool, String name, String description, JsonNode inputSchema, ToolPolicy executionPolicy,
+            ToolLevel requiredLevel, ToolRisk risk, int timeoutSeconds, int maxOutputBytes, int policyVersion) {
     }
 
     @Schema(name = "ExecutionMemorySettings")

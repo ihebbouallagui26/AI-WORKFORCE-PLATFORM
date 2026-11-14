@@ -33,7 +33,7 @@ async def test_protocol_handshake_and_tool_discovery():
     tools = ToolRegistry()
     async with connect(CONFIG, tools) as connection:
         discovered = await connection.discover_tools()
-    assert {t.name for t in discovered} == {"echo", "add"}
+    assert {t.name for t in discovered} == {"echo", "add", "record_note"}
     assert tools.get("diagnostic", "add") is not None and all(t.input_schema["type"] == "object" for t in discovered)
 
 

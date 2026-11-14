@@ -46,6 +46,8 @@ public enum Permission {
     SKILL_MANAGE("skill.manage"),
     AGENT_EXECUTE("agent.execute"),
     AGENT_EXECUTION_READ("agent.execution.read"),
+    APPROVAL_READ("approval.read"),
+    APPROVAL_DECIDE("approval.decide"),
     /** Reserved to the built-in OWNER role: never grantable to custom roles. */
     OWNERSHIP_MANAGE("ownership.manage");
 

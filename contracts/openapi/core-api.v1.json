@@ -57,8 +57,14 @@
     "name" : "AI providers",
     "description" : "Organization provider connections (credentials are write-only)"
   }, {
+    "name" : "Tool approvals",
+    "description" : "A person approves or rejects ONE exact tool action of an AI agent"
+  }, {
     "name" : "Members",
     "description" : "Organization memberships"
+  }, {
+    "name" : "Agent tools",
+    "description" : "Tool calls requested by AI agents and the tools granted to them"
   } ],
   "paths" : {
     "/api/v1/organizations/{organizationId}/teams/{teamId}/leader" : {
@@ -2312,6 +2318,112 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/approvals/{approvalId}/reject" : {
+      "post" : {
+        "tags" : [ "Tool approvals" ],
+        "summary" : "Reject this tool call: it is never executed",
+        "operationId" : "rejectToolAction",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "approvalId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RejectToolActionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/approvals/{approvalId}/approve" : {
+      "post" : {
+        "tags" : [ "Tool approvals" ],
+        "summary" : "Approve this one tool call (never future ones). Refused when expired, decided, altered or no longer permitted",
+        "operationId" : "approveToolAction",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "approvalId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ApproveToolActionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/agents" : {
       "get" : {
         "tags" : [ "AI agents" ],
@@ -2578,7 +2690,7 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "PENDING", "RUNNING", "SUCCEEDED", "FAILED" ]
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED" ]
           }
         }, {
           "name" : "page",
@@ -2768,6 +2880,150 @@
         }
       }
     },
+    "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/tool-calls" : {
+      "post" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "The agent asks for a tool: the Core API decides (DENIED, AUTO or APPROVAL_REQUIRED) and records it",
+        "operationId" : "requestToolCall",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ToolCallRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolCallDecision"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/tool-calls/{invocationId}/complete" : {
+      "post" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "Report the (bounded) result or the failure of a running call",
+        "operationId" : "completeToolCall",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "invocationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ToolCallResult"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolCallOutcome"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/tool-calls/{invocationId}/begin" : {
+      "post" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "Start an authorized call (revalidated now); returns the arguments once, no-store",
+        "operationId" : "beginToolCall",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "invocationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolCallStart"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/start" : {
       "post" : {
         "tags" : [ "Internal (orchestrator)" ],
@@ -2797,6 +3053,42 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ExecutionStarted"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/resume" : {
+      "post" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "Continue a paused execution after the human decision (once per pause; acknowledges the notification)",
+        "operationId" : "resumeExecution",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ExecutionResume"
                 }
               }
             }
@@ -3960,6 +4252,78 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/tool-invocations" : {
+      "get" : {
+        "tags" : [ "Agent tools" ],
+        "summary" : "Tool call history of the organization, newest first",
+        "operationId" : "listToolInvocations",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "DENIED", "AWAITING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED" ]
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseToolInvocation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/models" : {
       "get" : {
         "tags" : [ "AI providers" ],
@@ -4153,7 +4517,7 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "PENDING", "RUNNING", "SUCCEEDED", "FAILED" ]
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED" ]
           }
         }, {
           "name" : "page",
@@ -4227,6 +4591,70 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/AgentExecution"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/executions/{executionId}/tool-calls" : {
+      "get" : {
+        "tags" : [ "Agent tools" ],
+        "summary" : "Tool calls of one execution, in order",
+        "operationId" : "getExecutionToolTimeline",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseToolInvocation"
                 }
               }
             }
@@ -4361,6 +4789,121 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/approvals" : {
+      "get" : {
+        "tags" : [ "Tool approvals" ],
+        "summary" : "Approval requests, newest first (filter by status or execution)",
+        "operationId" : "listToolApprovals",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED" ]
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseToolApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/approvals/{approvalId}" : {
+      "get" : {
+        "tags" : [ "Tool approvals" ],
+        "summary" : "One approval request with the exact action it concerns",
+        "operationId" : "getToolApproval",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "approvalId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ToolApproval"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/agents/{agentId}/history" : {
       "get" : {
         "tags" : [ "AI agents" ],
@@ -4411,6 +4954,52 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/PageResponseAgentHistoryEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/available-tools" : {
+      "get" : {
+        "tags" : [ "Agent tools" ],
+        "summary" : "Tools granted to the agent and what the platform would do with a call (automatic, approval, denied)",
+        "operationId" : "listAvailableAgentTools",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AvailableTool"
+                  }
                 }
               }
             }
@@ -5859,6 +6448,132 @@
         },
         "required" : [ "code", "name" ]
       },
+      "AuthenticatedUser" : {
+        "type" : "object",
+        "properties" : {
+          "userId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "displayName" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RejectToolActionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "reason" : {
+            "type" : "string",
+            "maxLength" : 500,
+            "minLength" : 0
+          }
+        }
+      },
+      "ToolApproval" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "executionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "executionStatus" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED" ]
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "agentName" : {
+            "type" : "string"
+          },
+          "invocationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "toolCode" : {
+            "type" : "string"
+          },
+          "toolName" : {
+            "type" : "string"
+          },
+          "mcpServer" : {
+            "type" : "string"
+          },
+          "toolCallId" : {
+            "type" : "string"
+          },
+          "risk" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "argumentsRedacted" : {
+            "type" : "string"
+          },
+          "argumentsHash" : {
+            "type" : "string"
+          },
+          "policyVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED" ]
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "decidedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "decidedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rejectionReason" : {
+            "type" : "string"
+          },
+          "invocationStatus" : {
+            "type" : "string",
+            "enum" : [ "DENIED", "AWAITING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED" ]
+          }
+        }
+      },
+      "ApproveToolActionRequest" : {
+        "type" : "object",
+        "description" : "The hash of the arguments the reviewer saw. It must equal the stored one: a stale or altered request is refused.",
+        "properties" : {
+          "argumentsHash" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[0-9a-f]{64}$"
+          }
+        },
+        "required" : [ "argumentsHash" ]
+      },
       "CreateAgentRequest" : {
         "type" : "object",
         "properties" : {
@@ -5963,24 +6678,6 @@
           }
         }
       },
-      "AuthenticatedUser" : {
-        "type" : "object",
-        "properties" : {
-          "userId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "email" : {
-            "type" : "string"
-          },
-          "emailVerified" : {
-            "type" : "boolean"
-          },
-          "displayName" : {
-            "type" : "string"
-          }
-        }
-      },
       "StartExecutionRequest" : {
         "type" : "object",
         "properties" : {
@@ -6016,7 +6713,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "PENDING", "RUNNING", "SUCCEEDED", "FAILED" ]
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED" ]
           },
           "providerType" : {
             "type" : "string",
@@ -6087,6 +6784,205 @@
           }
         }
       },
+      "JsonNode" : {
+        "type" : "object",
+        "properties" : {
+          "array" : {
+            "type" : "boolean"
+          },
+          "empty" : {
+            "type" : "boolean"
+          },
+          "null" : {
+            "type" : "boolean"
+          },
+          "float" : {
+            "type" : "boolean"
+          },
+          "container" : {
+            "type" : "boolean"
+          },
+          "pojo" : {
+            "type" : "boolean"
+          },
+          "short" : {
+            "type" : "boolean"
+          },
+          "double" : {
+            "type" : "boolean"
+          },
+          "string" : {
+            "type" : "boolean"
+          },
+          "number" : {
+            "type" : "boolean"
+          },
+          "int" : {
+            "type" : "boolean"
+          },
+          "long" : {
+            "type" : "boolean"
+          },
+          "object" : {
+            "type" : "boolean"
+          },
+          "textual" : {
+            "type" : "boolean",
+            "deprecated" : true
+          },
+          "binary" : {
+            "type" : "boolean"
+          },
+          "boolean" : {
+            "type" : "boolean"
+          },
+          "nodeType" : {
+            "type" : "string",
+            "enum" : [ "ARRAY", "BINARY", "BOOLEAN", "MISSING", "NULL", "NUMBER", "OBJECT", "POJO", "STRING" ]
+          },
+          "bigDecimal" : {
+            "type" : "boolean"
+          },
+          "bigInteger" : {
+            "type" : "boolean"
+          },
+          "missingNode" : {
+            "type" : "boolean"
+          },
+          "integralNumber" : {
+            "type" : "boolean"
+          },
+          "valueNode" : {
+            "type" : "boolean"
+          },
+          "floatingPointNumber" : {
+            "type" : "boolean"
+          },
+          "embeddedValue" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "ToolCallRequest" : {
+        "type" : "object",
+        "properties" : {
+          "toolCallId" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          },
+          "toolCode" : {
+            "type" : "string",
+            "maxLength" : 80,
+            "minLength" : 0
+          },
+          "arguments" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "reason" : {
+            "type" : "string",
+            "maxLength" : 1000,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "toolCallId", "toolCode" ]
+      },
+      "ToolCallDecision" : {
+        "type" : "object",
+        "properties" : {
+          "invocationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "decision" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "approvalId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "ToolCallResult" : {
+        "type" : "object",
+        "properties" : {
+          "success" : {
+            "type" : "boolean"
+          },
+          "output" : {
+            "type" : "string",
+            "maxLength" : 200000,
+            "minLength" : 0
+          },
+          "truncated" : {
+            "type" : "boolean"
+          },
+          "errorCode" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "message" : {
+            "type" : "string",
+            "maxLength" : 1000,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "success" ]
+      },
+      "ToolCallOutcome" : {
+        "type" : "object",
+        "properties" : {
+          "invocationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "DENIED", "AWAITING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED" ]
+          }
+        }
+      },
+      "ToolCallStart" : {
+        "type" : "object",
+        "description" : "Single use: the call starts exactly once. Served with no-store.",
+        "properties" : {
+          "invocationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "toolCode" : {
+            "type" : "string"
+          },
+          "mcpServer" : {
+            "type" : "string"
+          },
+          "mcpTool" : {
+            "type" : "string"
+          },
+          "arguments" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "timeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxOutputBytes" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "ExecutionStarted" : {
         "type" : "object",
         "properties" : {
@@ -6099,6 +6995,28 @@
             "format" : "uuid"
           },
           "task" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ExecutionResume" : {
+        "type" : "object",
+        "properties" : {
+          "invocationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "approvalId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "decision" : {
+            "type" : "string"
+          },
+          "toolCode" : {
+            "type" : "string"
+          },
+          "rejectionReason" : {
             "type" : "string"
           }
         }
@@ -6578,6 +7496,147 @@
           },
           "enabled" : {
             "type" : "boolean"
+          },
+          "executionPolicy" : {
+            "type" : "string",
+            "enum" : [ "READ_ONLY", "APPROVAL_REQUIRED", "DENIED" ]
+          },
+          "requiredLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          }
+        }
+      },
+      "PageResponseToolInvocation" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ToolInvocation"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ToolApprovalSummary" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED" ]
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "decidedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "decidedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "rejectionReason" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ToolInvocation" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "executionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "toolCode" : {
+            "type" : "string"
+          },
+          "toolName" : {
+            "type" : "string"
+          },
+          "toolCallId" : {
+            "type" : "string"
+          },
+          "sequence" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "DENIED", "AWAITING_APPROVAL", "APPROVED", "RUNNING", "SUCCEEDED", "FAILED", "REJECTED", "EXPIRED" ]
+          },
+          "policy" : {
+            "type" : "string",
+            "enum" : [ "READ_ONLY", "APPROVAL_REQUIRED", "DENIED" ]
+          },
+          "argumentsRedacted" : {
+            "type" : "string"
+          },
+          "argumentsHash" : {
+            "type" : "string"
+          },
+          "reason" : {
+            "type" : "string"
+          },
+          "result" : {
+            "type" : "string"
+          },
+          "resultTruncated" : {
+            "type" : "boolean"
+          },
+          "errorCode" : {
+            "type" : "string"
+          },
+          "errorMessage" : {
+            "type" : "string"
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "approval" : {
+            "$ref" : "#/components/schemas/ToolApprovalSummary"
           }
         }
       },
@@ -6923,6 +7982,33 @@
           }
         }
       },
+      "PageResponseToolApproval" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ToolApproval"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "PageResponseAgentSummary" : {
         "type" : "object",
         "properties" : {
@@ -6995,6 +8081,52 @@
             "format" : "int64"
           },
           "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AvailableTool" : {
+        "type" : "object",
+        "properties" : {
+          "toolCode" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "risk" : {
+            "type" : "string",
+            "enum" : [ "LOW", "MEDIUM", "HIGH" ]
+          },
+          "requiredLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "grantedLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "decision" : {
+            "type" : "string"
+          },
+          "reasonCode" : {
+            "type" : "string"
+          },
+          "mcpServer" : {
+            "type" : "string"
+          },
+          "timeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxOutputBytes" : {
             "type" : "integer",
             "format" : "int32"
           }
@@ -7113,6 +8245,39 @@
           },
           "mcpTool" : {
             "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "inputSchema" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "executionPolicy" : {
+            "type" : "string",
+            "enum" : [ "READ_ONLY", "APPROVAL_REQUIRED", "DENIED" ]
+          },
+          "requiredLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "risk" : {
+            "type" : "string",
+            "enum" : [ "LOW", "MEDIUM", "HIGH" ]
+          },
+          "timeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxOutputBytes" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "policyVersion" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

@@ -66,7 +66,11 @@ function setup(permissions: PermissionCode[]) {
       return ok(next ? next() : runs[0] ?? execution(10, 'SUCCEEDED', { result: 'done' }));
     }
     if (request.method === 'GET' && path.endsWith('/executions')) return ok(page(runs));
-    return ok({});
+    // Contract-accurate answers for what the panel also reads; anything else is an explicit error, never `{}`.
+    if (request.method === 'GET' && /\/executions\/[^/]+\/tool-calls$/.test(path)) return ok(page([]));
+    if (request.method === 'GET' && /\/(agents|skills|providers\/connections|approvals)$/.test(path)) return ok(page([]));
+    if (request.method === 'GET' && path.endsWith('/tools')) return ok([]);
+    return { status: 404, body: { detail: `unexpected request ${request.method} ${path}` } };
   };
   desktop.install();
   const organizationId = signal<string | null>(ORG_A);
@@ -243,7 +247,10 @@ describe('Agent execution panel', () => {
 
   it('never displays or asks for a provider credential and keeps nothing in browser storage', async () => {
     const { desktop } = setup(RUN);
-    desktop.handler = (request) => ({ status: request.method === 'POST' ? 202 : 200, body: request.method === 'POST' ? execution(10, 'PENDING') : page([]) });
+    desktop.handler = (request) =>
+      request.method === 'POST'
+        ? { status: 202, body: execution(10, 'PENDING') }
+        : { status: 200, body: request.path.endsWith('/tools') ? [] : page([]) };
     const { fixture, el } = render(detail(1));
     await settle(fixture);
     type(el, 'task');
@@ -278,6 +285,8 @@ function contractHandler(overrides: { executions?: () => ApiResponse | Promise<A
     if (path.endsWith(`/agents/${id(1)}`)) return ok(detail(1));
     if (path.endsWith(`/agents/${id(1)}/executions`)) return overrides.executions?.() ?? ok(page([]));
     if (path.endsWith(`/agents/${id(1)}/history`)) return ok(page([]));
+    if (/\/executions\/[^/]+\/tool-calls$/.test(path)) return ok(page([]));
+    if (path.endsWith('/approvals')) return ok(page([]));
     if (path.endsWith('/tools')) return ok([]); // ToolDefinition[]: NOT a page
     if (path.endsWith('/skills')) return ok(page([]));
     if (path.endsWith('/providers/connections')) return ok(page([]));
@@ -373,6 +382,8 @@ describe('Agent detail integration', () => {
     expect(Array.isArray((await api.listSkills(ORG_A)).content)).toBe(true);
     expect(Array.isArray((await api.listConnections(ORG_A)).content)).toBe(true);
     expect(Array.isArray((await api.listExecutions(ORG_A, id(1))).content)).toBe(true);
+    expect(Array.isArray((await api.executionToolCalls(ORG_A, id(10))).content)).toBe(true);
+    expect(Array.isArray((await api.listApprovals(ORG_A)).content)).toBe(true);
   });
 });
 

@@ -45,11 +45,20 @@ class HttpOrchestratorGateway implements OrchestratorGateway {
 
     @Override
     public void dispatch(UUID organizationId, UUID executionId) {
+        post("/api/v1/executions", organizationId, executionId);
+    }
+
+    @Override
+    public void resume(UUID organizationId, UUID executionId) {
+        post("/api/v1/executions/resume", organizationId, executionId);
+    }
+
+    private void post(String path, UUID organizationId, UUID executionId) {
         if (!config.configured()) {
             throw new IllegalStateException("The orchestrator is not configured.");
         }
         try {
-            client.post().uri(URI.create(config.baseUrl().replaceAll("/+$", "") + "/api/v1/executions"))
+            client.post().uri(URI.create(config.baseUrl().replaceAll("/+$", "") + path))
                     .header("Authorization", "Bearer " + accessToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of("organizationId", organizationId.toString(), "executionId", executionId.toString()))

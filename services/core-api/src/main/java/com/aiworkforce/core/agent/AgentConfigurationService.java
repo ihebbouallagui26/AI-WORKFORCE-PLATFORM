@@ -285,7 +285,8 @@ public class AgentConfigurationService {
         return tools.findAll().stream().sorted(Comparator.comparing(ToolDefinition::getCategory)
                         .thenComparing(ToolDefinition::getCode))
                 .map(d -> new AgentView.ToolView(d.getCode(), d.getName(), d.getDescription(), d.getCategory(),
-                        d.getRisk(), d.getMaxLevel(), d.getMcpServer(), d.getMcpTool(), d.isEnabled())).toList();
+                        d.getRisk(), d.getMaxLevel(), d.getMcpServer(), d.getMcpTool(), d.isEnabled(),
+                        d.getExecutionPolicy(), d.getRequiredLevel())).toList();
     }
 
     @Transactional(readOnly = true)

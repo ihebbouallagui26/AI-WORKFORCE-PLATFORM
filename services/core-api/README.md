@@ -78,6 +78,7 @@ Secrets are never committed: `.env` files are ignored by Git, and only `*.env.ex
 
 - The schema is owned by **Flyway**: `src/main/resources/db/migration/V<n>__<description>.sql`. Migrations run automatically at startup, before Hibernate validates the schema (`ddl-auto=validate`).
 - `V1__enable_extensions.sql` enables `pgvector`; `V2__identity_and_organizations.sql` adds identity, organizations, RBAC, invitations and audit; `V3__workforce_management.sql` adds employee profiles, departments, positions, teams and ten permissions (granted to the built-in roles of existing organizations). `afterMigrate.sql` re-applies the runtime role's grants.
+- `V6__tool_execution_and_approvals.sql` (Sprint C2) is additive: tool policy columns on `tool_definitions` (all existing tools stay `DENIED`), the reference tools of the local `diagnostic` MCP server, the `WAITING_APPROVAL` execution status, the `tool_invocations` and `tool_approvals` tables, and the permissions `approval.read` / `approval.decide` (granted to `OWNER` and `ADMIN`). V1–V5 are untouched.
 - Flyway runs as `DB_MIGRATION_USERNAME`; the application pool uses `DB_APP_USERNAME` (see [ADR-0011](../../docs/adr/ADR-0011-database-privilege-separation.md)).
 - Applied migrations are immutable. A fix is a new migration, and `flyway clean` is disabled.
 - Conventions: [`docs/database/DATABASE_CONVENTIONS.md`](../../docs/database/DATABASE_CONVENTIONS.md).
@@ -110,7 +111,12 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 | `/api/v1/organizations/{id}/skills` (+ `/{id}`), `GET …/tools` | bearer token + membership + `skill.*` | Skill catalog and tool registry |
 | `/api/v1/organizations/{id}/teams/{teamId}/agents` (+ `/{agentId}`) | bearer token + membership + `team.manage` + `agent.read` | AI agents in teams (separate from human members) |
 | `POST/GET /api/v1/organizations/{id}/agents/{agentId}/executions`, `GET /api/v1/organizations/{id}/executions[/{executionId}]` | bearer token + membership + `agent.execute` / `agent.execution.read` | Supervised agent executions: launch (202, asynchronous), history (paginated, newest first), result |
+| `GET …/executions/{executionId}/tool-calls`, `GET …/tool-invocations` (filters `agentId`, `status`) | bearer token + membership + `agent.execution.read` | Tool calls of one execution (in order) and the organization's tool-call history (newest first). Pages. Arguments are the REDACTED rendering + SHA-256 hash, never raw. |
+| `GET …/agents/{agentId}/available-tools` | bearer token + membership + `agent.read` | Tools granted to the agent and what the platform would do with a call (automatic, approval, denied) |
+| `GET …/approvals` (filters `status`, `executionId`; page), `GET …/approvals/{approvalId}` | bearer token + membership + `approval.read` | Human approval requests: the exact call (tool, MCP server, risk, redacted arguments, hash, expiry) |
+| `POST …/approvals/{approvalId}/approve` `{argumentsHash}`, `POST …/approvals/{approvalId}/reject` `{reason?}` | bearer token + membership + `approval.decide` | Decide ONE request. `approve` needs the SHA-256 of the arguments that were reviewed (64 hex characters); `409` if the request is no longer pending, expired, its execution no longer waits, the arguments changed, or the agent no longer holds the grant. |
 | `POST /api/v1/internal/organizations/{id}/executions/{executionId}/{start,credential,complete,fail}` | **service account only** (`ai-orchestrator`) | Drives an execution through its state machine; `credential` is single use, RUNNING only, `no-store` |
+| `POST /api/v1/internal/organizations/{id}/executions/{executionId}/tool-calls`, `…/tool-calls/{invocationId}/begin`, `…/tool-calls/{invocationId}/complete`, `…/resume` | **service account only** (`ai-orchestrator`) | The orchestrator asks for a tool call (the Core API decides: automatic / approval / denied), starts an authorized call (revalidated now; returns the arguments once, `no-store`), reports its bounded result, and takes a human decision to continue a paused run (once per pause). |
 | `GET /api/v1/internal/organizations/{id}/agents/{agentId}/execution-context` | **service account only** (`ai-orchestrator`) | Read-only, secret-free configuration of an ACTIVE agent for the AI orchestrator |
 | everything else | — | `401` without a valid token |
 
@@ -119,10 +125,57 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 - **Errors:** `application/problem+json` (RFC 9457) with `type` (`urn:aiworkforce:problem:*`), `title`, `status`, `detail`, `instance`, `timestamp` and `requestId`. Validation errors add `errors[{field, message}]`.
 - **Correlation:** send `X-Request-Id` (8–64 characters among `[A-Za-z0-9-]`), or one is generated. It is echoed in the response, in errors, and in every log line.
 
+## Tool execution and human approval (Sprint C2)
+
+The Core API owns every decision and every record; the orchestrator never writes Core tables. Architecture and threat model:
+[`docs/architecture/MCP_AND_TOOL_SECURITY.md`](../../docs/architecture/MCP_AND_TOOL_SECURITY.md),
+[`docs/architecture/APPROVAL_RECOVERY_ARCHITECTURE.md`](../../docs/architecture/APPROVAL_RECOVERY_ARCHITECTURE.md).
+
+**Execution states** (`ExecutionStatus`): `PENDING → RUNNING → WAITING_APPROVAL → RUNNING → SUCCEEDED | FAILED`
+(`WAITING_APPROVAL` may also go to `FAILED`). There is no `CANCELLED` or `TIMEOUT` state: a timeout is `FAILED` with `errorCode = TIMEOUT`.
+`WAITING_APPROVAL` counts as open (it uses the per-organization concurrency budget) until it is decided, expires, or is abandoned.
+
+**Tool call states** (`InvocationStatus`): `DENIED` (final at creation); `AWAITING_APPROVAL → APPROVED | REJECTED | EXPIRED | FAILED`;
+`APPROVED → RUNNING → SUCCEEDED | FAILED`. A call starts at most once.
+**Approval states** (`ApprovalStatus`): `PENDING → APPROVED | REJECTED | EXPIRED | CANCELLED`; only `PENDING` changes, once.
+`CANCELLED` closes an approval whose execution ended before a decision.
+
+**Policy** (`tool_definitions.execution_policy`): `READ_ONLY` runs automatically for an explicitly granted agent;
+`APPROVAL_REQUIRED` pauses the run; `DENIED` (default) never runs. Unknown, disabled, ungranted or under-levelled tools are always denied.
+Grants, policy version and agent status are revalidated when the call starts, after any approval.
+
+**Properties** (`app.executions.*`, defaults in `ExecutionProperties`; set them like any Spring property, e.g. `APP_EXECUTIONS_APPROVAL_TIMEOUT=PT10M`;
+only `EXECUTIONS_TIMEOUT`, `EXECUTIONS_MAX_CONCURRENT`, `EXECUTIONS_DISPATCH_MAX_THREADS`, `EXECUTIONS_DISPATCH_QUEUE` have dedicated variables):
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `approval-timeout` | `PT15M` | A person has this long to decide; then the approval is `EXPIRED` and the run fails (`APPROVAL_EXPIRED`). |
+| `resume-give-up` | `PT15M` | A decision the orchestrator never takes up for this long fails the run (`RESUME_FAILED`). |
+| `max-tool-calls-per-execution` | `10` | Tool calls one execution may request (denied ones included). |
+| `max-tool-argument-bytes` | `8192` | Canonical argument size of one call. |
+| `max-tool-output-chars` | `8000` | Tool results are truncated to this before being stored. |
+| `approval-maintenance-ms` | `10000` | Period of the approval maintenance pass. |
+| `reaper-interval-ms` | `30000` | Period of the stale-execution reaper (only `PENDING`/`RUNNING` are reaped). |
+
+**Approval maintenance** (`ApprovalMaintenance`, PostgreSQL only, no broker; safe with several instances): each pass (1) expires pending
+approvals past their deadline, (2) closes approvals of already-ended executions (`CANCELLED` or acknowledged) and closes calls still
+`RUNNING` after their execution ended as `FAILED / OUTCOME_UNKNOWN`, (3) re-sends the resume notification of decided approvals the
+orchestrator has not acknowledged (at most one worker per 10-second window; attempts are recorded in `tool_approvals`).
+The decision itself is committed first and never depends on the notification.
+
+**Idempotency.** Delivery is *at least once*; processing is idempotent: `resume` succeeds once per pause (a duplicate gets `409` and does
+nothing), `begin` succeeds once per call, a decided approval cannot be decided again. This is **not** exactly-once delivery.
+
+**Troubleshooting.** An execution stuck in `WAITING_APPROVAL` with a decided approval: check the orchestrator is reachable
+(`ORCHESTRATOR_URL`), the `ai-workforce-core-api` service account secret, and `tool_approvals.resume_attempts` /
+`resume_acknowledged_at`; after `resume-give-up` the run fails with `RESUME_FAILED`. `STATE_UNAVAILABLE` on resume means the orchestrator
+could not open the sealed state (wrong or missing `AIO_STATE_ENCRYPTION_KEY`, see `docs/architecture/STATE_ENCRYPTION.md`). After a
+restart of the Core API nothing needs to be done: all state is in PostgreSQL.
+
 ## Tests
 
 ```bash
-./mvnw clean verify     # 207 tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
+./mvnw clean verify     # 255 tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
 ./mvnw clean package    # tests + executable jar in target/
 ./mvnw dependency:analyze
 ```

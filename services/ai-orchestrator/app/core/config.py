@@ -27,7 +27,7 @@ def is_secure_url(url: str, *, allow_loopback_http: bool = True) -> bool:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AIO_", extra="ignore", frozen=True)
+    model_config = SettingsConfigDict(env_prefix="AIO_", extra="ignore", frozen=True, hide_input_in_errors=True)
 
     environment: Literal["dev", "test", "prod"] = "dev"
     # Bound to loopback by default: the service is internal and never published by default.
@@ -70,15 +70,51 @@ class Settings(BaseSettings):
     execution_max_output_tokens: int = Field(default=1024, ge=1, le=64_000)
     max_concurrent_executions: int = Field(default=4, ge=1, le=64)
 
+    # --- Tool execution (C2) -------------------------------------------------------------------------
+    # Tools are offered to the model only when BOTH a state encryption key is configured (a run that
+    # pauses for a human approval is persisted sealed) and at least one allowlisted MCP server is enabled.
+    state_encryption_key: SecretStr | None = None
+    tool_max_rounds: int = Field(default=6, ge=1, le=20)
+    tool_max_calls_per_run: int = Field(default=8, ge=1, le=10)  # the Core API caps an execution at 10
+    tool_output_max_chars: int = Field(default=8000, ge=256, le=65_536)
+    mcp_servers: Annotated[tuple[str, ...], NoDecode] = ("diagnostic",)
+    mcp_max_concurrent_calls: int = Field(default=4, ge=1, le=32)
+
     # --- MCP --------------------------------------------------------------------------------------
     mcp_timeout_seconds: float = Field(default=15.0, gt=0, le=300)
 
-    @field_validator("allowed_caller_client_ids", "execution_enabled_providers", mode="before")
+    @field_validator("allowed_caller_client_ids", "execution_enabled_providers", "mcp_servers", mode="before")
     @classmethod
     def _split_callers(cls, value: object) -> object:
         if isinstance(value, str):
             return tuple(part.strip() for part in value.split(",") if part.strip())
         return value
+
+    @field_validator("state_encryption_key")
+    @classmethod
+    def _valid_state_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None and value.get_secret_value():
+            import base64
+            import binascii
+
+            try:
+                raw = base64.b64decode(value.get_secret_value(), validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("AIO_STATE_ENCRYPTION_KEY must be base64") from exc
+            if len(raw) != 32:
+                raise ValueError("AIO_STATE_ENCRYPTION_KEY must be the base64 of 32 bytes")
+        return value
+
+    @property
+    def tools_enabled(self) -> bool:
+        key = self.state_encryption_key
+        return bool(key and key.get_secret_value()) and bool(self.mcp_servers)
+
+    def state_key_bytes(self) -> bytes:
+        import base64
+
+        assert self.state_encryption_key is not None
+        return base64.b64decode(self.state_encryption_key.get_secret_value())
 
     @model_validator(mode="after")
     def _validate_endpoints(self) -> Settings:
@@ -105,6 +141,8 @@ class Settings(BaseSettings):
                 raise ValueError("AIO_DATABASE_URL is required in production")
             if not self.allowed_caller_client_ids:
                 raise ValueError("AIO_ALLOWED_CALLER_CLIENT_IDS must not be empty in production")
+            if self.state_encryption_key is None or not self.state_encryption_key.get_secret_value():
+                raise ValueError("AIO_STATE_ENCRYPTION_KEY is required in production")
         return self
 
 

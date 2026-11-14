@@ -31,7 +31,8 @@ async def runtime_info(request: Request, caller: Caller) -> RuntimeInfo:
         mcpServers=["diagnostic"],
         features={
             "agentExecution": request.app.state.executor is not None,
-            "toolExecution": False,
+            "toolExecution": settings.tools_enabled and request.app.state.executor is not None,
+            "humanApproval": settings.tools_enabled and request.app.state.executor is not None,
             "diagnosticGraph": True,
             "checkpointPersistence": request.app.state.checkpoint_probe is not None,
         },

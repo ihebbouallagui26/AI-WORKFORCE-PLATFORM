@@ -23,6 +23,7 @@ from app.core.logging import get_logger
 from app.orchestration.graphs.execution import (
     FAILURES,
     RunContext,
+    ToolRuntime,
     build_execution_graph,
     classify,
 )
@@ -45,7 +46,9 @@ class ExecutionRunner:
         core: CoreApiClient,
         providers: ProviderRegistry,
         checkpointer: BaseCheckpointSaver[Any],
+        tools: ToolRuntime | None = None,
     ) -> None:
+        self._tools = tools
         self._settings = settings
         self._core = core
         self._providers = providers
@@ -56,19 +59,20 @@ class ExecutionRunner:
     def active(self) -> int:
         return len(self._tasks)
 
-    def submit(self, organization_id: UUID, execution_id: UUID) -> None:
-        """Starts the run in the background. The ids are NOT trusted: the Core API validates the pair
-        in its first call (``start``), and answers 404 for any organization that does not own it."""
+    def submit(self, organization_id: UUID, execution_id: UUID, *, resume: bool = False) -> None:
+        """Starts the run (or its continuation after a human decision) in the background. The ids are NOT trusted:
+        the Core API validates the pair in its first call (``start`` or ``resume``) and answers 404 for any
+        organization that does not own it. A resume is also idempotent there (once per pause)."""
         key = thread_id_for(organization_id, execution_id)
         if key in self._tasks:
             raise DuplicateExecution
         if len(self._tasks) >= self._settings.max_concurrent_executions:
             raise UnavailableError("The orchestrator is at capacity.")
-        task = asyncio.create_task(self._run(organization_id, execution_id), name=f"execution-{execution_id}")
+        task = asyncio.create_task(self._run(organization_id, execution_id, resume), name=f"execution-{execution_id}")
         self._tasks[key] = task
         task.add_done_callback(lambda _t, k=key: self._tasks.pop(k, None))
 
-    async def _run(self, organization_id: UUID, execution_id: UUID) -> None:
+    async def _run(self, organization_id: UUID, execution_id: UUID, resume: bool = False) -> None:
         run = RunContext(organization_id=organization_id, execution_id=execution_id)
         graph = build_execution_graph(
             self._checkpointer,
@@ -77,13 +81,19 @@ class ExecutionRunner:
             adapter_factory=self._providers.adapter_with,
             enabled_providers=self._settings.execution_enabled_providers,
             max_output_tokens=self._settings.execution_max_output_tokens,
+            tools=self._tools,
         )
         initial = {
             "organization_id": str(organization_id),
             "execution_id": str(execution_id),
-            "status": "pending",
+            "status": "resuming" if resume else "pending",
             "steps": [],
         }
+        if resume:
+            initial["mode"] = "resume"
+            # The thread keeps its last state: a failure code left by an earlier (e.g. duplicate) invocation must not
+            # be reported again by this one.
+            initial["error_code"] = ""
         config = {"configurable": {"thread_id": thread_id_for(organization_id, execution_id)}}
         try:
             async with asyncio.timeout(self._settings.run_timeout_seconds):
@@ -99,8 +109,8 @@ class ExecutionRunner:
             log.error("execution_crashed", execution_id=str(execution_id), code=code, error=type(exc).__name__)
             await self._report_failure(organization_id, execution_id, code)
         finally:
-            # Drop the instruction, prompt and result as soon as the run ends.
-            run.task, run.messages, run.result = "", [], ""
+            # Drop the instruction, prompt, conversation and result as soon as the run (segment) ends.
+            run.task, run.messages, run.result, run.loop, run.resume, run.offered = "", [], "", None, None, {}
 
     async def _report_failure(self, organization_id: UUID, execution_id: UUID, code: str) -> None:
         try:
