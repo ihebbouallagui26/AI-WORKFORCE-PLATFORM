@@ -2,7 +2,10 @@
 
 Complements [PROVIDER_ARCHITECTURE.md](PROVIDER_ARCHITECTURE.md) (B3: connections, SecretStore). C0 adds the **runtime side**: asynchronous adapters in the Python orchestrator. No second key store exists.
 
-## 1. Credential flow (future, designed now)
+## 1. Credential flow (implemented in C1 for Anthropic)
+
+> **C1:** the mechanism below is now implemented. The Core API issues the credential through `POST /api/v1/internal/organizations/{org}/executions/{id}/credential` (orchestrator service account only, RUNNING executions only, **once per execution**, agent still ACTIVE, PRIMARY binding unchanged, connection VALID, provider enabled; decrypted by `ProviderCredentialBroker` in the provider package; `Cache-Control: no-store`; redacted `toString`; never stored, audited or returned elsewhere). The orchestrator obtains it with an execution-scoped `CredentialResolver` **inside the model-invocation node only**: it is never put in LangGraph state, checkpoints, logs, errors or the execution record. Decision record: [ADR-0017](../adr/ADR-0017-supervised-execution-and-credential-issuance.md).
+
 
 ```
 orchestrator ──(service token)──► Core API ──► SecretStore.reveal (provider package only) ──► plaintext, in memory
@@ -34,11 +37,15 @@ Official REST APIs are used through HTTPX rather than vendor SDKs: three small, 
 * **Retries**: rate limits, timeouts and transient failures only, exponential backoff with jitter, `Retry-After` honoured up to a cap, bounded attempts; authentication and bad-request errors are never retried. Streaming retries only before the first event.
 * Response size is capped (8 MiB) for non-streaming calls.
 
-## 4. Testing and what is (not) verified
+## 4. Anthropic in C1
+
+The Anthropic adapter (Messages API, `x-api-key` + `anthropic-version: 2023-06-01`) runs supervised executions: model id from the agent's PRIMARY binding (never hardcoded), `max_tokens` from `AIO_EXECUTION_MAX_OUTPUT_TOKENS` (default 1024), bounded timeout and retries (429/5xx/timeouts only, `Retry-After` honoured), usage (`input_tokens`/`output_tokens`) recorded by the Core API. OpenAI and Gemini adapters are intact but **not enabled** (`AIO_EXECUTION_ENABLED_PROVIDERS=ANTHROPIC`; the Core API refuses to launch an agent whose primary provider is not Anthropic). No automatic fallback between providers. Error normalization to safe codes is described in [AI_ORCHESTRATION_ARCHITECTURE.md](AI_ORCHESTRATION_ARCHITECTURE.md) §9.2.
+
+## 5. Testing and what is (not) verified
 
 | Layer | How | Proves |
 | --- | --- | --- |
 | Unit (CI, default) | `respx` mocks of all three providers: success, headers, usage, streaming, 401/400-invalid-key, 429 + `Retry-After`, timeout, 5xx, bad payloads, key never in errors/attributes | Adapter logic and secret hygiene |
 | **Live smoke (opt-in)** | `tests/test_live_providers.py`, runs only with `AIO_LIVE_PROVIDER_TESTS=1` **and** `AIO_LIVE_ANTHROPIC_KEY` / `AIO_LIVE_OPENAI_KEY` / `AIO_LIVE_GEMINI_KEY` | Real connectivity of the **catalog** endpoint only — never a generation, so nothing is billed |
 
-**Real provider connectivity has not been verified in C0**: no real key was available, so the live tests were skipped (3 skipped). Mocked tests prove nothing about the providers' actual behaviour.
+**Real provider connectivity has not been verified in C0 or C1**: no real key was available, so the live tests were skipped (3 skipped). Mocked tests prove nothing about the providers' actual behaviour.

@@ -66,6 +66,24 @@ class DiagnosticState(TypedDict, total=False):
     result: str
 
 
+class ExecutionGraphState(TypedDict, total=False):
+    """State of a supervised agent execution. Identifiers, stage names, counters and a safe error code
+    ONLY: no instruction, no result, no prompt, no credential, no token (those are run-local data)."""
+
+    organization_id: str
+    execution_id: str
+    agent_id: str
+    status: str
+    stage: str
+    provider: str
+    model: str
+    # Not named *token*: the checkpoint guard rejects any key that looks like an authentication token.
+    usage_input: int
+    usage_output: int
+    error_code: str
+    steps: Annotated[list[str], operator.add]
+
+
 def assert_state_safe(update: dict[str, Any]) -> None:
     """Rejects secret-looking keys and token-looking values before they reach a checkpoint."""
     if redact(update) != update or REDACTED in repr(update):

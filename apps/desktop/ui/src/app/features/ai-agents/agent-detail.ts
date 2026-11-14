@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { AgentExecutions } from './agent-executions';
 import { AgentsApi } from '../../core/agents/agents.api';
 import {
   AgentBinding,
@@ -42,7 +43,7 @@ interface ToolDraft {
  */
 @Component({
   selector: 'app-agent-detail',
-  imports: [Panel, Badge, EmptyState, Skeleton],
+  imports: [Panel, Badge, EmptyState, Skeleton, AgentExecutions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (detail.error(); as message) {
@@ -67,7 +68,7 @@ interface ToolDraft {
           }
         </ng-container>
         <p class="text-tertiary">
-          Active means eligible for future execution: agents are not run in this version.
+          Active means the agent can be run on request. Runs are always launched by a person, one at a time, as text generation only.
         </p>
         @if (d.agent.description) { <p>{{ d.agent.description }}</p> }
         <p><strong>Title:</strong> {{ d.agent.title || '—' }}</p>
@@ -92,6 +93,8 @@ interface ToolDraft {
           </details>
         }
       </ui-panel>
+
+      <app-agent-executions [detail]="d" />
 
       <ui-panel heading="Model providers" subheading="One primary model; fallbacks are tried in priority order in a later phase">
         @if (d.providers.length === 0) {

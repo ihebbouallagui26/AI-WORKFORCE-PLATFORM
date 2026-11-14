@@ -254,7 +254,7 @@ describe('Agent detail', () => {
     await settle(fixture);
     expect(buttons(el)).toContain('Activate');
     expect(buttons(el)).toContain('Archive');
-    expect(text(el)).toContain('not run in this version');
+    expect(text(el)).toContain('launched by a person');
     granted.set(new Set<PermissionCode>(MEMBER));
     await settle(fixture);
     expect(buttons(el)).not.toContain('Activate');

@@ -1,4 +1,6 @@
-# AI orchestration architecture (Phase C0)
+# AI orchestration architecture (Phases C0 and C1)
+
+> **C1 update:** the orchestrator now runs the first real, human-initiated, supervised execution (see §9). The statements below about C0 remain true for everything except §8, whose first items are delivered in C1.
 
 Scope of C0: the **secure foundation** of the Python orchestration engine. No agent is executed, no model is called for a task, no tool runs. C1 (first executable agent), C2 (real tools and MCP authorization) and C3 are built on this base.
 
@@ -84,4 +86,57 @@ Isolation in depth:
 
 ## 8. Not in C0
 
-Agent execution, prompts/LLM calls for tasks, tool and MCP execution workflows, approval delivery, execution records in the Core API, trusted credential resolution, usage/cost accounting, retries across providers (fallback orchestration), streaming to the desktop.
+Agent execution, prompts/LLM calls for tasks, tool and MCP execution workflows, approval delivery, execution records in the Core API, trusted credential resolution, usage/cost accounting, retries across providers (fallback orchestration), streaming to the desktop. *(C1 delivered execution, the execution record, trusted credential resolution and usage metadata for Anthropic; the rest remains deferred, see §9.5–9.6.)*
+
+## 9. Supervised execution (Phase C1)
+
+### 9.1 Flow
+
+```
+Angular ──POST /agents/{id}/executions {task}──► Core API (user token: membership + agent.execute, agent ACTIVE,
+   │  (202, polls GET /executions/{id})            primary binding VALID + Anthropic, org concurrency limit)
+   │                                               │ 1. records PENDING (audit: no instruction)
+   │                                               │ 2. after commit: POST {orchestrator}/api/v1/executions {organizationId, executionId}
+   │                                               ▼    (Core API service account "ai-workforce-core-api", answered 202)
+   │                                      Orchestrator (background asyncio task, LangGraph, PostgreSQL checkpoints)
+   │                                               │ 3. POST /internal/…/executions/{id}/start      PENDING→RUNNING, returns task
+   │                                               │ 4. GET  /internal/…/agents/{id}/execution-context   (C0)
+   │                                               │ 5. POST /internal/…/executions/{id}/credential  single use, RUNNING only
+   │                                               │ 6. Anthropic Messages API (real adapter)
+   │                                               │ 7. POST /internal/…/executions/{id}/complete | /fail
+   ▼                                               ▼
+ result + history ◄────────────── Core API persists status, result, model, usage, safe error
+```
+
+### 9.2 Graph (`orchestration/graphs/execution.py`)
+
+`validate → start → load_context → build_prompt → invoke_model → report → finalize`, with one failure branch `report_failure`. Each stage is wrapped by `guarded`: any exception becomes a safe error code (`PROVIDER_AUTHENTICATION`, `PROVIDER_RATE_LIMIT`, `PROVIDER_TIMEOUT`, `PROVIDER_UNAVAILABLE`, `PROVIDER_BAD_REQUEST`, `PROVIDER_INVALID_RESPONSE`, `CREDENTIAL_UNAVAILABLE`, `AGENT_NOT_ELIGIBLE`, `PROVIDER_NOT_ENABLED`, `PROVIDER_NOT_CONFIGURED`, `CORE_API_UNAVAILABLE`, `CORE_API_REJECTED`, `EXECUTION_TIMEOUT`, `EXECUTION_FAILED`) with a fixed user-facing message; provider and Core API bodies are never copied. The "resolve credential" and "invoke" stages are one node on purpose: the secret never travels between nodes.
+
+State (checkpointed) = organization, execution and agent ids, status, stage, provider and model names, usage counts, error code, step names. **Not** in state: credential, instruction, prompt, result (run-local `RunContext`, wiped when the run ends).
+
+Prompt: system message from the agent's name, handle, system instructions and active skills plus a fixed rule (text only, no tools); user message = the instruction. `max_tokens` = `AIO_EXECUTION_MAX_OUTPUT_TOKENS` (default 1024). Tool grants are **not** interpreted as permission to run tools. No fallback between providers; only `ANTHROPIC` is in `AIO_EXECUTION_ENABLED_PROVIDERS`.
+
+### 9.3 Persistence and status model
+
+Table `agent_executions` (V5): organization-scoped composite keys to `agents` and `provider_connections`, CHECK constraints for the state machine (completion time iff terminal, result only on success, error code iff failed), token usage, correlation id, `credential_resolved_at`. Permissions `agent.execute` and `agent.execution.read` (OWNER/ADMIN only; members and custom roles are not widened). See [ADR-0017](../adr/ADR-0017-supervised-execution-and-credential-issuance.md).
+
+### 9.4 Service-to-service authentication (both directions)
+
+| Direction | Keycloak client | Audience | Accepted by |
+| --- | --- | --- | --- |
+| orchestrator → Core API | `ai-orchestrator` | `ai-workforce-api` | Core API `/api/v1/internal/**` chain (`azp` = orchestrator client; refused on user endpoints) |
+| Core API → orchestrator | `ai-workforce-core-api` | `ai-orchestrator` | orchestrator `JwtVerifier` (`azp` ∈ `AIO_ALLOWED_CALLER_CLIENT_IDS`) |
+
+A user or desktop token is rejected in both places; a service token is rejected on user endpoints. Both clients are confidential, client-credentials only, provisioned by `infra/keycloak/scripts/provision-orchestrator-client.sh`.
+
+### 9.5 Hand-over, recovery and limits
+
+**Hand-over (Core API).** After the launch transaction commits, `ExecutionDispatcher` submits the hand-over explicitly to a bounded pool (`app.executions.dispatch-max-threads`, `dispatch-queue-capacity`; `AbortPolicy`, never caller-runs). The orchestration HTTP call therefore never runs on a request thread. Outcomes: delivered → the orchestrator takes over; pool saturated → the execution is failed immediately with `DISPATCH_CAPACITY_EXCEEDED` (the launch answers `202` with the execution id **and its already-final FAILED state**); delivery error → `ORCHESTRATOR_UNAVAILABLE` **only if the execution is still `PENDING`** (`ExecutionCoordinator.failIfPending`, own transaction, row lock). A RUNNING, SUCCEEDED or FAILED execution is never overwritten by a dispatch error.
+
+**Recovery (reaper).** Every 30 s (`app.executions.reaper-interval-ms`) executions still `PENDING` or `RUNNING` after `app.executions.timeout` (default 5 min, measured from creation) are failed with `TIMEOUT` (`failIfOpen`, same guarded transition). Closing them frees the organization's open-execution capacity (default 3). Worst case before capacity returns after a crash or restart: timeout + one reaper interval (about 5.5 min by default). **C1 does not redispatch**: if the Core API dies between the commit and the hand-over, or the orchestrator restarts mid-run, the execution ends as `TIMEOUT` and the user relaunches. Automatic redispatch is deliberately not implemented: without an idempotency token known to the provider call it could run, and bill, the same instruction twice. Keep `AIO_RUN_TIMEOUT_SECONDS` below `app.executions.timeout`.
+
+**Configuration safety.** The Core API refuses to start if `app.orchestrator.dispatch` is partial or malformed, and outside the `dev`/`test` profiles requires HTTPS for the orchestrator and token URLs (the orchestrator enforces HTTPS for its own endpoints in `prod`).
+
+### 9.6 Limits and deferred work
+
+In-process tasks (no restart survival; the Core API reaper fails them), polling instead of push, no cancellation, no streaming, one provider (Anthropic), no tools/MCP/shell/files, no multi-agent, no approvals, no durable queue. C2: real tools and MCP authorization; C3: collaboration.

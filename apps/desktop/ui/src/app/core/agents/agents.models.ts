@@ -203,3 +203,34 @@ export interface ProviderModel {
   readonly id: string;
   readonly displayName: string;
 }
+
+// ---------------------------------------------------------------- supervised executions (Sprint C1)
+
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/** A human-initiated run of an agent. There is no credential anywhere in it: only provider type and model. */
+export interface AgentExecution {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly agentId: string;
+  readonly requestedBy: string;
+  readonly task: string;
+  readonly status: ExecutionStatus;
+  readonly providerType: ProviderType;
+  readonly modelId: string;
+  readonly result: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  readonly createdAt: string;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+  readonly version: number;
+}
+
+export const TERMINAL_EXECUTION: readonly ExecutionStatus[] = ['SUCCEEDED', 'FAILED'];
+
+export function isTerminal(status: ExecutionStatus): boolean {
+  return TERMINAL_EXECUTION.includes(status);
+}

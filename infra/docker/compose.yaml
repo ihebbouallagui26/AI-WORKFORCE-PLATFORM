@@ -137,6 +137,10 @@ services:
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:?SECRETS_MASTER_KEY is required (bash infra/docker/scripts/ensure-env.sh)}
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
+      # Core API -> orchestrator (its own Keycloak service account; blank secret = dispatching disabled).
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_DOCKER_URL:-http://ai-orchestrator:8091}
+      ORCHESTRATOR_TOKEN_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/token
+      CORE_API_SERVICE_CLIENT_SECRET: ${CORE_API_SERVICE_CLIENT_SECRET:-}
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"
@@ -163,6 +167,7 @@ services:
       AIO_OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8082/realms/ai-workforce}
       AIO_OIDC_JWKS_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/certs
       AIO_CORE_API_BASE_URL: ${ORCHESTRATOR_CORE_API_URL:-http://core-api:8080}
+      AIO_ALLOWED_CALLER_CLIENT_IDS: ai-workforce-core-api
       # Dedicated database and restricted role: no access to the Core API or Keycloak databases.
       AIO_DATABASE_URL: postgresql://${ORCHESTRATOR_DB_USERNAME:?ORCHESTRATOR_DB_USERNAME is required}:${ORCHESTRATOR_DB_PASSWORD:?ORCHESTRATOR_DB_PASSWORD is required}@postgres:5432/${ORCHESTRATOR_DB_NAME:?ORCHESTRATOR_DB_NAME is required}
     ports:

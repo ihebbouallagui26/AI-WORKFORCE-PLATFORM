@@ -117,7 +117,7 @@ An `Agent` has an `identity` (name, department, role, responsibilities, skills) 
 ## Known limitations
 
 - In `api` mode, AI agents, providers, skills, tool permissions and team assignments are real (Core API, Phase B3). In the `mock` build, and for projects, communication and supervision, the data is demo data: changes last for the current session only.
-- Agents are configured, not executed: `ACTIVE` only means eligible for a future execution phase. No tool, shell or MCP server runs.
+- Since Sprint C1 an active Anthropic-backed agent can be **run on request** from its detail page: the user writes an instruction and launches it; the run is asynchronous (the page polls), text generation only (no tool, shell, file or MCP action), and the result and history are read from the Core API. Nothing is ever started automatically, and no provider key is asked for or shown during a run. The Electron allowlist exposes only launch/list/read of executions, never the internal service endpoints.
 - A provider API key is typed once in a write-only field, sent through the main process and cleared at once. It transits renderer memory and IPC before reaching the main process, and is never stored, displayed or returned. Real provider connectivity is not covered by automated tests (local fake servers only).
 - The job title in the profile is local (the Core API stores only the display name).
 - Agents do not execute tasks or reply, and approvals are not delivered to agents.

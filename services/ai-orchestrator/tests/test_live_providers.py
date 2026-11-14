@@ -46,3 +46,24 @@ async def test_live_model_catalog(name):
     async with httpx.AsyncClient(base_url=base, timeout=30) as http:
         models = await adapter_class(http, EnvResolver(key)).list_models(SCOPE)
     assert models, "the provider returned an empty model catalog"
+
+
+GENERATION_ENABLED = ENABLED and os.environ.get("AIO_LIVE_ANTHROPIC_GENERATION") == "1"
+
+
+async def test_live_anthropic_generation():
+    """BILLABLE (a few tokens): needs a second explicit opt-in, a real key and a real model id.
+
+    AIO_LIVE_PROVIDER_TESTS=1 AIO_LIVE_ANTHROPIC_GENERATION=1 AIO_LIVE_ANTHROPIC_KEY=... AIO_LIVE_ANTHROPIC_MODEL=<model id>
+    """
+    key = os.environ.get("AIO_LIVE_ANTHROPIC_KEY", "")
+    model = os.environ.get("AIO_LIVE_ANTHROPIC_MODEL", "")
+    if not (GENERATION_ENABLED and key and model):
+        pytest.skip("live generation test disabled (billable): see the docstring for the opt-in variables")
+    from app.providers.base import ChatMessage, GenerationRequest
+
+    async with httpx.AsyncClient(base_url="https://api.anthropic.com", timeout=60) as http:
+        response = await AnthropicAdapter(http, EnvResolver(key)).generate(
+            SCOPE, GenerationRequest(model=model, messages=[ChatMessage(role="user", content="Reply with the single word: ok")], max_output_tokens=16)
+        )
+    assert response.text.strip() and response.usage.output_tokens > 0

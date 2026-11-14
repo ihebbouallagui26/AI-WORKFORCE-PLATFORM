@@ -44,6 +44,8 @@ public enum Permission {
     PROVIDER_TEST("provider.test"),
     SKILL_READ("skill.read"),
     SKILL_MANAGE("skill.manage"),
+    AGENT_EXECUTE("agent.execute"),
+    AGENT_EXECUTION_READ("agent.execution.read"),
     /** Reserved to the built-in OWNER role: never grantable to custom roles. */
     OWNERSHIP_MANAGE("ownership.manage");
 

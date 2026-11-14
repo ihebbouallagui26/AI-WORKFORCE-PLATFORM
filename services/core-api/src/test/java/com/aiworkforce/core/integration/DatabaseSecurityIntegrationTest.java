@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("4");
+            assertThat(result.targetSchemaVersion).isEqualTo("5");
         }
     }
 
@@ -243,7 +243,7 @@ class DatabaseSecurityIntegrationTest {
                 }
             }
 
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("4").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("4");
@@ -264,7 +264,7 @@ class DatabaseSecurityIntegrationTest {
                     assertThat(rows.getInt(1)).isEqualTo(6);
                 }
             }
-            flyway.apply("latest").validate();
+            flyway.apply("4").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
@@ -277,6 +277,75 @@ class DatabaseSecurityIntegrationTest {
                         + "risk, max_level) VALUES ('rogue.tool', 'x', 'x', 'x', 'LOW', 'READ')"))
                         .isInstanceOf(java.sql.SQLException.class);
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE agents ADD COLUMN x int"))
+                        .isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A B3 database (V1..V4, built-in roles already holding the agent permissions) upgrades to V5:
+     * the two execution permissions go to OWNER and ADMIN only (members and custom roles are never
+     * widened), the execution table exists with its state-machine constraints and tenant keys, and
+     * the runtime role can use it but not change the schema.
+     */
+    @Test
+    void upgradesAnExistingB3DatabaseAndAddsExecutionPermissions() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("4").migrate();
+
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID owner = UUID.randomUUID();
+            UUID admin = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID custom = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'b3@example.test', true, 'B3', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing B3 organization', '" + user + "', now(), now())");
+                String roles = "INSERT INTO roles (id, organization_id, code, name, built_in, created_at, updated_at) VALUES ";
+                statement.execute(roles + "('" + owner + "', '" + organization + "', 'OWNER', 'Owner', true, now(), now()), ('"
+                        + admin + "', '" + organization + "', 'ADMIN', 'Administrator', true, now(), now()), ('"
+                        + member + "', '" + organization + "', 'MEMBER', 'Member', true, now(), now())");
+                statement.execute("INSERT INTO roles (id, organization_id, name, built_in, created_at, updated_at) VALUES ('"
+                        + custom + "', '" + organization + "', 'Agent reader', false, now(), now())");
+                for (UUID role : new UUID[] {owner, admin, member, custom}) {
+                    statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                            + role + "', '" + organization + "', 'agent.read')");
+                }
+            }
+
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("5");
+
+            String execution = "^agent[.]execut";
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword())) {
+                assertThat(countPermissions(connection, owner, execution)).isEqualTo(2);
+                assertThat(countPermissions(connection, admin, execution)).isEqualTo(2);
+                assertThat(countPermissions(connection, member, execution)).isZero();
+                assertThat(countPermissions(connection, custom, execution)).isZero();
+                assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM agent_executions");
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE agent_executions ADD COLUMN x int"))
                         .isInstanceOf(java.sql.SQLException.class);
             }
         }

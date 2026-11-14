@@ -28,7 +28,8 @@ import tools.jackson.databind.json.JsonMapper;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Import({TestcontainersConfiguration.class, TestIdentityProvider.class, MailpitConfiguration.class, FakeProviders.class})
+@Import({TestcontainersConfiguration.class, TestIdentityProvider.class, MailpitConfiguration.class, FakeProviders.class,
+        RecordingOrchestrator.class})
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class ApiIntegrationTest {

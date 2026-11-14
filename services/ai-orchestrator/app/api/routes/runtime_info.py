@@ -30,7 +30,7 @@ async def runtime_info(request: Request, caller: Caller) -> RuntimeInfo:
         providers=list(PROVIDER_KINDS),
         mcpServers=["diagnostic"],
         features={
-            "agentExecution": False,
+            "agentExecution": request.app.state.executor is not None,
             "toolExecution": False,
             "diagnosticGraph": True,
             "checkpointPersistence": request.app.state.checkpoint_probe is not None,

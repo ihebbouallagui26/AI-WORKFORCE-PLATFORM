@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic.alias_generators import to_camel
 
 
@@ -66,7 +66,28 @@ class AgentExecutionContext(WireModel):
     memory: MemorySettings | None = None
 
 
-# ---- Contracts prepared for C1 (no HTTP call exists yet) ---------------------------------------
+# ---- Execution run contracts (C1): the orchestrator drives an execution through the Core API ----------
+
+
+class ExecutionStarted(WireModel):
+    """PENDING to RUNNING answer: the instruction and the agent it was given for."""
+
+    execution_id: UUID
+    agent_id: UUID
+    task: str
+
+
+class ExecutionCredential(WireModel):
+    """A single-use provider credential. It is a ``SecretStr`` and lives only in the call that needs it:
+    it is never placed in graph state, logs, errors or checkpoints."""
+
+    connection_id: UUID
+    provider_type: ProviderType
+    model_id: str
+    credential: SecretStr
+
+
+# ---- Contracts prepared for later phases (no HTTP call exists yet) ---------------------------------------
 
 
 class ExecutionState(StrEnum):

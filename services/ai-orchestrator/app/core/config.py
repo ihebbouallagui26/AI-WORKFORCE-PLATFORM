@@ -64,10 +64,16 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com"
     google_base_url: str = "https://generativelanguage.googleapis.com"
 
+    # --- Supervised execution (C1): text generation only -------------------------------------------
+    # Providers allowed to run an execution. OpenAI and Gemini adapters exist but are not enabled yet.
+    execution_enabled_providers: Annotated[tuple[str, ...], NoDecode] = ("ANTHROPIC",)
+    execution_max_output_tokens: int = Field(default=1024, ge=1, le=64_000)
+    max_concurrent_executions: int = Field(default=4, ge=1, le=64)
+
     # --- MCP --------------------------------------------------------------------------------------
     mcp_timeout_seconds: float = Field(default=15.0, gt=0, le=300)
 
-    @field_validator("allowed_caller_client_ids", mode="before")
+    @field_validator("allowed_caller_client_ids", "execution_enabled_providers", mode="before")
     @classmethod
     def _split_callers(cls, value: object) -> object:
         if isinstance(value, str):

@@ -113,3 +113,37 @@ async def test_application_readiness_with_a_database(database, keys):
             response = await http.get("/health/ready")
     assert response.status_code == 200 and response.json() == {"status": "UP", "checks": {"checkpointStore": "UP"}}
     assert RUNTIME_PASSWORD not in response.text
+
+
+@pytest.mark.docker
+async def test_an_execution_graph_leaves_no_secret_instruction_or_result_in_postgres(database):
+    """The real execution graph on the real PostgreSQL checkpointer, with mocked Core API and Anthropic."""
+    import httpx
+    import respx
+
+    from tests.test_execution import ANTHROPIC, CORE, EXECUTION, ORG, RESULT, SECRET, TASK, CoreMock, Env, anthropic_ok
+
+    settings = Settings(
+        environment="test", database_url=SecretStr(database["runtime"]), anthropic_base_url=ANTHROPIC, run_timeout_seconds=10
+    )
+    async with open_postgres_checkpointer(settings) as saver:
+        env = Env(settings)
+        runner = await env.build()
+        runner._checkpointer = saver  # noqa: SLF001 - same runner, durable checkpointer
+        with respx.mock:
+            CoreMock(respx.mock)
+            anthropic_ok()
+            runner.submit(ORG, EXECUTION)
+            import asyncio
+
+            await asyncio.gather(*list(runner._tasks.values()))  # noqa: SLF001
+        await env.close()
+    assert CORE and httpx
+    with psycopg.connect(database["runtime"]) as conn:
+        text = ""
+        for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+            for row in conn.execute(f"SELECT * FROM orchestrator_runtime.{table}").fetchall():
+                text += repr(row)
+    for forbidden in (SECRET, "THIS-IS-A-FAKE-KEY", TASK, RESULT, "Be precise", "service-access-token", "Bearer", "client-secret-value"):
+        assert forbidden not in text
+    assert str(EXECUTION) in text  # it did persist (identifiers and stage names only)

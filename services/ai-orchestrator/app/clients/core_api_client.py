@@ -4,7 +4,9 @@
   never a token supplied by the desktop. The client secret is a ``SecretStr`` read from the
   environment; the access token lives in memory only and is never logged.
 * Idempotent GET requests are retried (network errors, timeouts, 502/503/504) with exponential
-  backoff and jitter; a 401 triggers exactly one token refresh.
+  backoff and jitter; a 401 triggers exactly one token refresh. POST operations that change an
+  execution are **never retried**: a duplicate would at best be refused (409) and for the credential
+  endpoint (single use) would be harmful.
 * Every failure becomes a safe :class:`OrchestratorError`: response bodies are never copied into
   messages or logs.
 """
@@ -21,7 +23,7 @@ from uuid import UUID
 import httpx
 from pydantic import SecretStr, ValidationError
 
-from app.clients.contracts import AgentExecutionContext
+from app.clients.contracts import AgentExecutionContext, ExecutionCredential, ExecutionStarted
 from app.core.errors import ForbiddenError, NotFoundError, OrchestratorError, UnavailableError
 from app.core.logging import get_logger
 
@@ -47,6 +49,14 @@ class CoreApiForbidden(ForbiddenError):
 
 class CoreApiNotFound(NotFoundError):
     default_message = "The requested resource was not found or is not accessible."
+
+
+class CoreApiConflict(OrchestratorError):
+    """The Core API refused the operation because of the resource state (e.g. already started, not active)."""
+
+    status = 409
+    code = "core-api-conflict"
+    default_message = "The Core API refused the operation in the current state."
 
 
 class CoreApiRequestError(OrchestratorError):
@@ -134,10 +144,12 @@ class CoreApiClient:
         self._backoff = backoff_seconds
         self._sleep = sleep
 
+    # ---- reads ------------------------------------------------------------------------------------
+
     async def get_execution_context(self, organization_id: UUID, agent_id: UUID) -> AgentExecutionContext:
         """The authorized configuration of one agent. Validated by the Core API, never trusted from callers."""
         path = f"/api/v1/internal/organizations/{organization_id}/agents/{agent_id}/execution-context"
-        payload = await self._get(path)
+        payload = await self._request("GET", path)
         try:
             context = AgentExecutionContext.model_validate(payload)
         except ValidationError as exc:
@@ -147,25 +159,73 @@ class CoreApiClient:
             raise CoreApiInvalidResponse
         return context
 
-    async def _get(self, path: str) -> Any:
+    # ---- execution run (state changes: never retried) ---------------------------------------------
+
+    @staticmethod
+    def _run_path(organization_id: UUID, execution_id: UUID, action: str) -> str:
+        return f"/api/v1/internal/organizations/{organization_id}/executions/{execution_id}/{action}"
+
+    async def start_execution(self, organization_id: UUID, execution_id: UUID) -> ExecutionStarted:
+        """PENDING to RUNNING. Returns the instruction; a 409 means it was already started or is final."""
+        payload = await self._request("POST", self._run_path(organization_id, execution_id, "start"), json={})
+        try:
+            started = ExecutionStarted.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
+        if started.execution_id != execution_id:
+            raise CoreApiInvalidResponse
+        return started
+
+    async def issue_credential(self, organization_id: UUID, execution_id: UUID) -> ExecutionCredential:
+        """The single-use provider credential of this execution. The caller must keep it ephemeral."""
+        payload = await self._request("POST", self._run_path(organization_id, execution_id, "credential"), json={})
+        try:
+            return ExecutionCredential.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
+
+    async def complete_execution(
+        self,
+        organization_id: UUID,
+        execution_id: UUID,
+        *,
+        result: str,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        model: str | None,
+    ) -> None:
+        body = {"result": result, "inputTokens": input_tokens, "outputTokens": output_tokens, "model": model}
+        await self._request("POST", self._run_path(organization_id, execution_id, "complete"), json=body)
+
+    async def fail_execution(self, organization_id: UUID, execution_id: UUID, *, error_code: str, message: str) -> None:
+        body = {"errorCode": error_code, "message": message}
+        await self._request("POST", self._run_path(organization_id, execution_id, "fail"), json=body)
+
+    # ---- transport --------------------------------------------------------------------------------
+
+    async def _request(self, method: str, path: str, *, json: dict[str, Any] | None = None) -> Any:
+        idempotent = method == "GET"
         refreshed = False
         attempt = 0
         while True:
             token = await self._tokens.get_token()
             try:
-                response = await self._http.get(path, headers={"Authorization": f"Bearer {token.get_secret_value()}"})
+                response = await self._http.request(
+                    method, path, json=json, headers={"Authorization": f"Bearer {token.get_secret_value()}"}
+                )
             except httpx.HTTPError as exc:
-                if attempt >= self._max_retries:
+                if not idempotent or attempt >= self._max_retries:
                     raise CoreApiUnavailable from exc
                 await self._pause(attempt)
                 attempt += 1
                 continue
             status = response.status_code
             if status == 401 and not refreshed:
+                # Rejected before processing: a single retry with a fresh token is safe for every method.
                 refreshed = True
                 self._tokens.invalidate()
                 continue
-            if status in _RETRYABLE_STATUS and attempt < self._max_retries:
+            if idempotent and status in _RETRYABLE_STATUS and attempt < self._max_retries:
                 await self._pause(attempt)
                 attempt += 1
                 continue
@@ -185,6 +245,8 @@ class CoreApiClient:
             raise CoreApiForbidden
         if status == 404:
             raise CoreApiNotFound
+        if status == 409:
+            raise CoreApiConflict
         if status in _RETRYABLE_STATUS or status >= 500:
             raise CoreApiUnavailable
         raise CoreApiRequestError

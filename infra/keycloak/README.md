@@ -41,7 +41,7 @@ bash infra/docker/scripts/ensure-env.sh                              # generates
 bash infra/keycloak/scripts/provision-orchestrator-client.sh         # idempotent; the secret is never printed
 ```
 
-The Core API accepts that client's tokens only on `/api/v1/internal/**` (`app.orchestrator.client-id` / `ORCHESTRATOR_CLIENT_ID`) and refuses them elsewhere. In production create the client through your normal change process and store the secret in a secret manager.
+A second client, `ai-workforce-core-api` (secret `CORE_API_SERVICE_CLIENT_SECRET`, token audience `ai-orchestrator`), is the identity of the Core API when it asks the orchestrator to run an execution (Phase C1); the same script provisions both, one per direction. The Core API accepts the orchestrator client's tokens only on `/api/v1/internal/**` (`app.orchestrator.client-id` / `ORCHESTRATOR_CLIENT_ID`) and refuses them elsewhere. In production create the client through your normal change process and store the secret in a secret manager.
 
 ## Create a user
 

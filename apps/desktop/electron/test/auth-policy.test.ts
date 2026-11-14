@@ -167,6 +167,10 @@ describe('resolveApiRequest', () => {
       { method: 'GET', path: `${base}/skills`, query: { active: true, category: 'Engineering' } },
       { method: 'GET', path: `${base}/tools` },
       { method: 'POST', path: `${base}/teams/${ORG}/agents`, body: { agentId: ORG } },
+      { method: 'POST', path: `${base}/agents/${ORG}/executions`, body: { task: 'Summarize the plan' } },
+      { method: 'GET', path: `${base}/agents/${ORG}/executions`, query: { status: 'SUCCEEDED', page: 0, size: 10 } },
+      { method: 'GET', path: `${base}/executions`, query: { agentId: ORG, status: 'FAILED' } },
+      { method: 'GET', path: `${base}/executions/${ORG}` },
     ];
     for (const request of allowed) {
       assert.ok(resolveApiRequest(request, API).ok, JSON.stringify(request));
@@ -182,6 +186,14 @@ describe('resolveApiRequest', () => {
       { method: 'POST', path: `${base}/agents/${ORG}/run`, body: {} },
       { method: 'POST', path: `${base}/agents/${ORG}/execute`, body: {} },
       { method: 'POST', path: `${base}/tools/execute`, body: {} },
+      // Executions: no cancel/edit/delete, no service endpoints, malformed filters.
+      { method: 'DELETE', path: `${base}/executions/${ORG}` },
+      { method: 'PUT', path: `${base}/executions/${ORG}`, body: {} },
+      { method: 'POST', path: `${base}/executions/${ORG}/complete`, body: { result: 'forged' } },
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/credential`, body: {} },
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/complete`, body: { result: 'x' } },
+      { method: 'GET', path: `/api/v1/internal/organizations/${ORG}/agents/${ORG}/execution-context` },
+      { method: 'GET', path: `${base}/executions`, query: { agentId: 'not-a-uuid' } },
       { method: 'GET', path: `${base}/agents`, query: { type: 'openai' } },
       { method: 'GET', path: `${base}/skills`, query: { category: '<script>' } },
       { method: 'GET', path: `${base}/skills`, query: { active: 'maybe' } },

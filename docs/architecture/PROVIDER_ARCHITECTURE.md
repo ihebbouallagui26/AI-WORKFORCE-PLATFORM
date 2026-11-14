@@ -34,6 +34,8 @@ Development/self-hosted adapter `AesGcmSecretStore`:
 
 Production should plug a KMS/Vault adapter behind the same interface.
 
+> **C1:** a second, server-side path now exists besides these write-only operations: the orchestrator's service account can obtain a credential for one RUNNING execution, once, through the Core API (see [PROVIDER_INTEGRATION_ARCHITECTURE.md](PROVIDER_INTEGRATION_ARCHITECTURE.md) §1). The desktop still never receives a credential.
+
 ## 3. Credential flow
 
 1. The user types the key once in a write-only password field (`POST …/providers/connections` or `PUT …/{id}/credential`). The renderer sends it to the Electron main process (`api:request`), which attaches the bearer token and forwards it. The renderer clears the field right away and never stores it in a store or `localStorage`; the API never returns it. This brief renderer-memory/IPC transit is a documented limitation (see Desktop README).

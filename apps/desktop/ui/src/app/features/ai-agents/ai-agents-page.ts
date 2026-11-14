@@ -18,7 +18,7 @@ import { SkillsTab } from './skills-tab';
   template: `
     <div class="page">
       <ui-page-header heading="AI agents"
-        description="Configure AI employees, their model providers, skills and tool permissions. Agents are not executed yet." />
+        description="Configure AI employees, their model providers, skills and tool permissions. Agents run only when a person launches them, as text generation." />
       @if (!store.organizationId()) {
         <ui-empty-state icon="building" heading="No organization selected" description="Select or create an organization first." />
       } @else {

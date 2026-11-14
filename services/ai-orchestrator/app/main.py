@@ -11,13 +11,14 @@ from fastapi import FastAPI
 from app import __version__
 from app.api.errors import install_exception_handlers
 from app.api.middleware import RequestContextMiddleware
-from app.api.routes import health, runtime_info
+from app.api.routes import executions, health, runtime_info
 from app.clients.core_api_client import CoreApiClient, ServiceTokenProvider
 from app.core.config import Settings, get_settings
 from app.core.errors import UnavailableError
 from app.core.logging import configure_logging, get_logger
 from app.core.security import JwtVerifier
 from app.orchestration.checkpointer.postgres import open_postgres_checkpointer, ping
+from app.orchestration.executor import ExecutionRunner
 from app.orchestration.runtime import OrchestrationRuntime
 from app.providers.base import ProviderScope
 from app.providers.registry import ProviderRegistry
@@ -56,9 +57,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             app.state.checkpoint_probe = None
             app.state.runtime = None
+            app.state.executor = None
             if settings.database_url is not None:
                 saver = await stack.enter_async_context(open_postgres_checkpointer(settings))
                 app.state.runtime = OrchestrationRuntime(saver, run_timeout_seconds=settings.run_timeout_seconds)
+                runner = ExecutionRunner(settings, app.state.core_api, providers, saver)
+                app.state.executor = runner
+                stack.push_async_callback(runner.shutdown)  # cancels running executions before resources close
 
                 async def probe() -> bool:
                     return await ping(saver)
@@ -79,9 +84,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.checkpoint_probe = None
+    app.state.executor = None
     install_exception_handlers(app)
     app.include_router(health.router)
     app.include_router(runtime_info.router)
+    app.include_router(executions.router)
     app.add_middleware(
         RequestContextMiddleware,
         timeout_seconds=settings.request_timeout_seconds,
