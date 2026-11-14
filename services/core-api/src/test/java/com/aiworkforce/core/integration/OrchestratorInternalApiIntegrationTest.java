@@ -48,7 +48,7 @@ class OrchestratorInternalApiIntegrationTest extends AgentFlows {
         UUID skill = skill(owner, org, "Code review", "Dev");
         putAs(owner, agents(org, "/" + agent + "/skills"), body("skillIds", List.of(skill))).andExpect(status().isOk());
         putAs(owner, agents(org, "/" + agent + "/tools"), body("grants", List.of(
-                body("toolCode", "docs.search", "level", "READ", "approvalRequired", false)))).andExpect(status().isOk());
+                body("toolCode", "diagnostic.echo", "level", "READ", "approvalRequired", false)))).andExpect(status().isOk());
         postAs(owner, agents(org, "/" + agent + "/activate"), "{}").andExpect(status().isOk());
 
         String body = asService(contextPath(org, agent))
@@ -63,7 +63,9 @@ class OrchestratorInternalApiIntegrationTest extends AgentFlows {
                 .andExpect(jsonPath("$.providers[0].modelId").value("model-x"))
                 .andExpect(jsonPath("$.providers[0].role").value("PRIMARY"))
                 .andExpect(jsonPath("$.tools", hasSize(1)))
-                .andExpect(jsonPath("$.tools[0].toolCode").value("docs.search"))
+                .andExpect(jsonPath("$.tools[0].toolCode").value("diagnostic.echo"))
+                .andExpect(jsonPath("$.tools[0].executionPolicy").value("READ_ONLY"))
+                .andExpect(jsonPath("$.tools[0].inputSchema.type").value("object"))
                 .andExpect(jsonPath("$.tools[0].level").value("READ"))
                 .andExpect(jsonPath("$.skills[0]").value("Code review"))
                 .andExpect(jsonPath("$.memory.enabled").value(false))

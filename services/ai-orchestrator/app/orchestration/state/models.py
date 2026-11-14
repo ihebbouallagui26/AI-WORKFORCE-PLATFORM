@@ -82,6 +82,13 @@ class ExecutionGraphState(TypedDict, total=False):
     usage_output: int
     error_code: str
     steps: Annotated[list[str], operator.add]
+    # C2: a run that waits for a human keeps its conversation SEALED (AES-256-GCM, bound to organization and
+    # execution) in ``loop_blob``; it is plain hex, never a credential or a token, and is cleared on completion.
+    mode: str
+    loop_blob: str
+    awaiting_invocation: str
+    rounds: int
+    tool_calls: int
 
 
 def assert_state_safe(update: dict[str, Any]) -> None:

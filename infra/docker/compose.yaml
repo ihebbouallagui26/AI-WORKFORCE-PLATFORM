@@ -163,6 +163,9 @@ services:
       # Service identity (OAuth2 client credentials): provision it with infra/keycloak/scripts/provision-orchestrator-client.sh
       AIO_CLIENT_ID: ai-orchestrator
       AIO_CLIENT_SECRET: ${ORCHESTRATOR_CLIENT_SECRET:?ORCHESTRATOR_CLIENT_SECRET is required (bash infra/docker/scripts/ensure-env.sh)}
+      # Seals the state of runs paused for a human approval. Required, no default, never baked into the image:
+      # it comes from the protected .env (local) or from the platform's secret injection (production).
+      AIO_STATE_ENCRYPTION_KEY: ${ORCHESTRATOR_STATE_ENCRYPTION_KEY:?ORCHESTRATOR_STATE_ENCRYPTION_KEY is required (bash infra/docker/scripts/ensure-env.sh)}
       AIO_TOKEN_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/token
       AIO_OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8082/realms/ai-workforce}
       AIO_OIDC_JWKS_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/certs

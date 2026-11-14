@@ -206,7 +206,8 @@ export interface ProviderModel {
 
 // ---------------------------------------------------------------- supervised executions (Sprint C1)
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+/** WAITING_APPROVAL (Sprint C2): the run is suspended until a person decides a tool approval. Not final. */
+export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'WAITING_APPROVAL' | 'SUCCEEDED' | 'FAILED';
 
 /** A human-initiated run of an agent. There is no credential anywhere in it: only provider type and model. */
 export interface AgentExecution {
@@ -230,6 +231,74 @@ export interface AgentExecution {
 }
 
 export const TERMINAL_EXECUTION: readonly ExecutionStatus[] = ['SUCCEEDED', 'FAILED'];
+
+// ---------------------------------------------------------------- tool calls and human approvals (Sprint C2)
+
+export type InvocationStatus = 'DENIED' | 'AWAITING_APPROVAL' | 'APPROVED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'REJECTED' | 'EXPIRED';
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
+export type ToolPolicy = 'READ_ONLY' | 'APPROVAL_REQUIRED' | 'DENIED';
+
+/** Decision of a person about an approval, as embedded in a tool call. */
+export interface ApprovalSummary {
+  readonly id: string;
+  readonly status: ApprovalStatus;
+  readonly requestedAt: string;
+  readonly expiresAt: string;
+  readonly decidedBy: string | null;
+  readonly decidedAt: string | null;
+  readonly rejectionReason: string | null;
+}
+
+/** One tool call of an execution. Arguments are the server's REDACTED rendering; there is never a credential in it. */
+export interface ToolInvocation {
+  readonly id: string;
+  readonly executionId: string;
+  readonly agentId: string;
+  readonly toolCode: string;
+  readonly toolName: string | null;
+  readonly toolCallId: string;
+  readonly sequence: number;
+  readonly status: InvocationStatus;
+  readonly policy: ToolPolicy;
+  readonly argumentsRedacted: string;
+  readonly argumentsHash: string;
+  readonly reason: string | null;
+  readonly result: string | null;
+  readonly resultTruncated: boolean;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  readonly requestedAt: string;
+  readonly startedAt: string | null;
+  readonly completedAt: string | null;
+  readonly approval: ApprovalSummary | null;
+}
+
+/** A human approval request: exactly one tool call, with these (redacted) arguments. Approving it authorizes nothing else. */
+export interface ToolApproval {
+  readonly id: string;
+  readonly executionId: string;
+  readonly executionStatus: ExecutionStatus | null;
+  readonly agentId: string;
+  readonly agentName: string | null;
+  readonly invocationId: string;
+  readonly toolCode: string;
+  readonly toolName: string | null;
+  readonly mcpServer: string | null;
+  readonly toolCallId: string;
+  readonly risk: ToolRisk;
+  readonly description: string;
+  readonly reason: string | null;
+  readonly argumentsRedacted: string;
+  readonly argumentsHash: string;
+  readonly policyVersion: number;
+  readonly status: ApprovalStatus;
+  readonly requestedAt: string;
+  readonly expiresAt: string;
+  readonly decidedBy: string | null;
+  readonly decidedAt: string | null;
+  readonly rejectionReason: string | null;
+  readonly invocationStatus: InvocationStatus | null;
+}
 
 export function isTerminal(status: ExecutionStatus): boolean {
   return TERMINAL_EXECUTION.includes(status);

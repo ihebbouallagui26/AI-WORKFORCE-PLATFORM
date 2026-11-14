@@ -23,8 +23,11 @@ class ExecutionContextReader {
     private final AgentSupport support;
     private final AgentService agents;
     private final ToolDefinitionRepository toolDefinitions;
+    private final ToolGrantRepository grants;
 
-    ExecutionContextReader(AgentSupport support, AgentService agents, ToolDefinitionRepository toolDefinitions) {
+    ExecutionContextReader(AgentSupport support, AgentService agents, ToolDefinitionRepository toolDefinitions,
+            ToolGrantRepository grants) {
+        this.grants = grants;
         this.support = support;
         this.agents = agents;
         this.toolDefinitions = toolDefinitions;
@@ -47,11 +50,22 @@ class ExecutionContextReader {
         Map<String, AgentParts.ToolDefinition> registry = toolDefinitions
                 .findAllById(detail.tools().stream().map(AgentView.ToolGrantView::toolCode).toList()).stream()
                 .collect(Collectors.toMap(AgentParts.ToolDefinition::getCode, Function.identity()));
+        // Only tools the platform would let this agent use (explicit grant, enabled, policy not DENIED, an execution
+        // backend, enough level). The orchestrator never offers anything else to the model; the Core API decides
+        // again, call by call, so this list is a convenience, not an authorization.
+        Map<String, AgentParts.ToolGrant> granted = grants.findByOrganizationIdAndIdAgentId(organizationId, agentId).stream()
+                .collect(Collectors.toMap(AgentParts.ToolGrant::getToolCode, Function.identity()));
         List<ExecutionContextView.ToolPermission> tools = detail.tools().stream()
-                .filter(grant -> registry.get(grant.toolCode()) != null && registry.get(grant.toolCode()).isEnabled())
-                .map(grant -> new ExecutionContextView.ToolPermission(grant.toolCode(), grant.level(),
-                        grant.approvalRequired(), registry.get(grant.toolCode()).getMcpServer(),
-                        registry.get(grant.toolCode()).getMcpTool()))
+                .filter(grant -> ToolPolicyEvaluator.evaluate(registry.get(grant.toolCode()), granted.get(grant.toolCode())).allowed())
+                .map(grant -> {
+                    AgentParts.ToolDefinition tool = registry.get(grant.toolCode());
+                    boolean approval = ToolPolicyEvaluator.evaluate(tool, granted.get(grant.toolCode()))
+                            .decision() == ToolPolicyEvaluator.Decision.APPROVAL_REQUIRED;
+                    return new ExecutionContextView.ToolPermission(grant.toolCode(), grant.level(), approval,
+                            tool.getMcpServer(), tool.getMcpTool(), tool.getName(), tool.getDescription(),
+                            ToolArguments.parse(tool.getInputSchema()), tool.getExecutionPolicy(), tool.getRequiredLevel(),
+                            tool.getRisk(), tool.getTimeoutSeconds(), tool.getMaxOutputBytes(), tool.getPolicyVersion());
+                })
                 .toList();
 
         AgentView.Memory memory = detail.memory();

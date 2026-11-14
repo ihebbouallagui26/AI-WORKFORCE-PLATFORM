@@ -4,6 +4,7 @@ import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
 import { TabItem, Tabs } from '../../shared/components/tabs/tabs';
 import { AgentsTab } from './agents-tab';
+import { ApprovalsTab } from './approvals-tab';
 import { ProvidersTab } from './providers-tab';
 import { SkillsTab } from './skills-tab';
 
@@ -13,12 +14,12 @@ import { SkillsTab } from './skills-tab';
  */
 @Component({
   selector: 'app-ai-agents-page',
-  imports: [PageHeader, Tabs, EmptyState, AgentsTab, ProvidersTab, SkillsTab],
+  imports: [PageHeader, Tabs, EmptyState, AgentsTab, ApprovalsTab, ProvidersTab, SkillsTab],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <ui-page-header heading="AI agents"
-        description="Configure AI employees, their model providers, skills and tool permissions. Agents run only when a person launches them, as text generation." />
+        description="Configure AI employees, their model providers, skills and tool permissions. Agents run only when a person launches them; sensitive tool actions wait for a person's approval." />
       @if (!store.organizationId()) {
         <ui-empty-state icon="building" heading="No organization selected" description="Select or create an organization first." />
       } @else {
@@ -28,6 +29,7 @@ import { SkillsTab } from './skills-tab';
             @case ('agents') { <app-agents-tab /> }
             @case ('providers') { <app-providers-tab /> }
             @case ('skills') { <app-skills-tab /> }
+            @case ('approvals') { @if (store.can('approval.read')) { <app-approvals-tab /> } }
           }
         </div>
       }
@@ -42,5 +44,6 @@ export class AiAgentsPage {
     { id: 'agents', label: 'Agents', count: this.store.totalAgents() },
     { id: 'providers', label: 'Providers', count: this.store.connections().length },
     { id: 'skills', label: 'Skills', count: this.store.skills().length },
+    ...(this.store.can('approval.read') ? [{ id: 'approvals', label: 'Approvals' }] : []),
   ]);
 }

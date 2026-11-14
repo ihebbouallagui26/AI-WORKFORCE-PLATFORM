@@ -118,7 +118,26 @@ public class AgentExecution {
         startedAt = now;
     }
 
-    /** The provider credential may be handed to the orchestrator once per execution, while it is RUNNING. */
+    /** The agent asked for a tool that needs a human decision: the run is suspended until it is taken. */
+    void waitForApproval(Instant now) {
+        transition(ExecutionStatus.WAITING_APPROVAL, now);
+    }
+
+    /**
+     * A human decision arrived: WAITING_APPROVAL to RUNNING, exactly once per pause. The next run segment
+     * gets its own single-use credential (the previous one was never kept anywhere).
+     */
+    void resumeAfterDecision(Instant now) {
+        transition(ExecutionStatus.RUNNING, now);
+        credentialResolvedAt = null;
+    }
+
+    /** Records activity (a tool call started or finished) so that the stale-execution reaper measures idleness. */
+    void touch(Instant now) {
+        updatedAt = now;
+    }
+
+    /** The provider credential may be handed to the orchestrator once per run segment, while it is RUNNING. */
     void markCredentialResolved(Instant now) {
         if (status != ExecutionStatus.RUNNING) {
             throw new ConflictException("The execution is not running.");

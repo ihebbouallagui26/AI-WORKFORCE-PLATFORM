@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -35,12 +35,29 @@ class ProviderBindingRef(WireModel):
     priority: int
 
 
+ExecutionPolicy = Literal["READ_ONLY", "APPROVAL_REQUIRED", "DENIED"]
+
+
 class ToolPermission(WireModel):
+    """A tool the Core API would let this agent use (explicit grant, enabled, policy not DENIED).
+
+    It is what the orchestrator may OFFER to the model. It is not an authorization: the Core API decides
+    again, call by call, and re-validates immediately before every execution."""
+
     tool_code: str
     level: ToolLevel
     approval_required: bool
     mcp_server: str | None = None
     mcp_tool: str | None = None
+    name: str = ""
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=lambda: {"type": "object"})
+    execution_policy: ExecutionPolicy = "DENIED"
+    required_level: ToolLevel = "READ"
+    risk: Literal["LOW", "MEDIUM", "HIGH"] = "HIGH"
+    timeout_seconds: int = 10
+    max_output_bytes: int = 4096
+    policy_version: int = 1
 
 
 class MemorySettings(WireModel):
@@ -85,6 +102,43 @@ class ExecutionCredential(WireModel):
     provider_type: ProviderType
     model_id: str
     credential: SecretStr
+
+
+# ---- Tool calls (C2): the Core API decides, records and audits; the orchestrator executes ---------------
+
+
+class ToolCallDecision(WireModel):
+    """The Core API's decision about a requested call. ``invocation_id`` is null only for an unknown tool."""
+
+    invocation_id: UUID | None = None
+    decision: Literal["DENIED", "AUTO", "APPROVAL_REQUIRED", "APPROVED"] | str
+    code: str = ""
+    message: str = ""
+    approval_id: UUID | None = None
+    expires_at: datetime | None = None
+
+
+class ToolCallStart(WireModel):
+    """Everything needed to run an authorized call. The arguments here are the ones the Core API stored and
+    hashed (what a person approved), never the ones the model may have re-sent."""
+
+    invocation_id: UUID
+    tool_code: str
+    mcp_server: str
+    mcp_tool: str
+    arguments: dict[str, Any]
+    timeout_seconds: int
+    max_output_bytes: int
+
+
+class ResumeInfo(WireModel):
+    """The human decision of a paused execution."""
+
+    invocation_id: UUID
+    approval_id: UUID
+    decision: Literal["APPROVED", "REJECTED"]
+    tool_code: str
+    rejection_reason: str | None = None
 
 
 # ---- Contracts prepared for later phases (no HTTP call exists yet) ---------------------------------------

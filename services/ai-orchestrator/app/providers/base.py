@@ -22,7 +22,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 from uuid import UUID
 
 import httpx
@@ -106,10 +106,92 @@ class GenerationRequest(BaseModel):
         return value
 
 
+# ---- tool use (C2): provider-neutral conversation blocks -------------------------------------------------
+#
+# Only the Anthropic adapter implements ``generate_turn`` in C2. The blocks are provider neutral so the
+# orchestration layer never sees a vendor payload; model text and tool arguments are untrusted data.
+
+
+class TextBlock(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    type: Literal["text"] = "text"
+    text: str
+
+
+class ToolUseBlock(BaseModel):
+    """The model asks for a tool. ``name`` and ``input`` come from the model and are NEVER trusted."""
+
+    model_config = ConfigDict(frozen=True)
+    type: Literal["tool_use"] = "tool_use"
+    id: str
+    name: str
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolResultBlock(BaseModel):
+    """What the platform answers to a tool request. ``content`` is wrapped as untrusted data upstream."""
+
+    model_config = ConfigDict(frozen=True)
+    type: Literal["tool_result"] = "tool_result"
+    tool_use_id: str
+    content: str
+    is_error: bool = False
+
+
+Block = Annotated[TextBlock | ToolUseBlock | ToolResultBlock, Field(discriminator="type")]
+
+
+class TurnMessage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    role: Literal["user", "assistant"]
+    content: str | list[Block]
+
+
+class ToolSpec(BaseModel):
+    """A tool offered to the model. ``name`` is the provider-safe alias, mapped back to the registry by the platform."""
+
+    model_config = ConfigDict(frozen=True)
+    name: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    description: str = Field(max_length=1000)
+    input_schema: dict[str, Any]
+
+
+class TurnRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    model: str
+    system: str = ""
+    messages: list[TurnMessage] = Field(min_length=1)
+    tools: list[ToolSpec] = Field(default_factory=list, max_length=20)
+    max_output_tokens: int = Field(default=1024, ge=1, le=128_000)
+
+    @field_validator("model")
+    @classmethod
+    def _valid_model_id(cls, value: str) -> str:
+        if not MODEL_ID_PATTERN.fullmatch(value):
+            raise ValueError("invalid model identifier")
+        return value
+
+
 class Usage(BaseModel):
     model_config = ConfigDict(frozen=True)
     input_tokens: int = 0
     output_tokens: int = 0
+
+
+class TurnResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    model: str
+    blocks: list[TextBlock | ToolUseBlock]
+    usage: Usage = Field(default_factory=lambda: Usage())
+    stop_reason: str | None = None
+
+    @property
+    def text(self) -> str:
+        return "".join(b.text for b in self.blocks if isinstance(b, TextBlock))
+
+    @property
+    def tool_uses(self) -> list[ToolUseBlock]:
+        return [b for b in self.blocks if isinstance(b, ToolUseBlock)]
 
 
 class GenerationResponse(BaseModel):
@@ -206,6 +288,10 @@ class ProviderAdapter(ABC):
         return status in (401, 403)
 
     # -- public API --
+    async def generate_turn(self, scope: ProviderScope, request: TurnRequest) -> TurnResponse:
+        """One model turn with tool use. Not available on every provider (Anthropic only in C2)."""
+        raise ProviderBadRequestError("This provider does not support tool use in this version.")
+
     async def generate(self, scope: ProviderScope, request: GenerationRequest) -> GenerationResponse:
         payload = await self._call_json(scope, self._generate_spec(request))
         return self._parse_generation(request, payload)

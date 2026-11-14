@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("5");
+            assertThat(result.targetSchemaVersion).isEqualTo("6");
         }
     }
 
@@ -326,7 +326,7 @@ class DatabaseSecurityIntegrationTest {
                 }
             }
 
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("5").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("5");
@@ -340,12 +340,102 @@ class DatabaseSecurityIntegrationTest {
                 assertThat(countPermissions(connection, custom, execution)).isZero();
                 assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
             }
-            flyway.apply("latest").validate();
+            flyway.apply("5").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
                 statement.execute("SELECT count(*) FROM agent_executions");
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE agent_executions ADD COLUMN x int"))
+                        .isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A C1 database (V1..V5, with an organization whose built-in roles exist and one execution already
+     * RUNNING) upgrades to V6: tool registry columns with a DENIED default, the three reference tools,
+     * the approval permissions for OWNER and ADMIN only, the WAITING_APPROVAL status, the invocation and
+     * approval tables with their database-level guarantees, and the runtime role keeps DML but no DDL.
+     */
+    @Test
+    void upgradesAnExistingC1DatabaseAndAddsToolExecutionAndApprovals() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("5").migrate();
+
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID owner = UUID.randomUUID();
+            UUID admin = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID custom = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'c1@example.test', true, 'C1', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing C1 organization', '" + user + "', now(), now())");
+                String roles = "INSERT INTO roles (id, organization_id, code, name, built_in, created_at, updated_at) VALUES ";
+                statement.execute(roles + "('" + owner + "', '" + organization + "', 'OWNER', 'Owner', true, now(), now()), ('"
+                        + admin + "', '" + organization + "', 'ADMIN', 'Administrator', true, now(), now()), ('"
+                        + member + "', '" + organization + "', 'MEMBER', 'Member', true, now(), now())");
+                statement.execute("INSERT INTO roles (id, organization_id, name, built_in, created_at, updated_at) VALUES ('"
+                        + custom + "', '" + organization + "', 'Runner', false, now(), now())");
+                for (UUID role : new UUID[] {owner, admin, member, custom}) {
+                    statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                            + role + "', '" + organization + "', 'agent.execute')");
+                }
+            }
+
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("6");
+
+            String approvals = "^approval[.]";
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                assertThat(countPermissions(connection, owner, approvals)).isEqualTo(2);
+                assertThat(countPermissions(connection, admin, approvals)).isEqualTo(2);
+                assertThat(countPermissions(connection, member, approvals)).isZero();
+                assertThat(countPermissions(connection, custom, approvals)).isZero();
+                assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
+                // Every B3 placeholder defaults to DENIED; only the three reference tools can run.
+                try (java.sql.ResultSet rows = statement.executeQuery(
+                        "SELECT count(*) FILTER (WHERE execution_policy = 'DENIED'), count(*) FILTER (WHERE execution_policy <> 'DENIED') FROM tool_definitions")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(6);
+                    assertThat(rows.getInt(2)).isEqualTo(3);
+                }
+                // A READ_ONLY policy can never cover a write level or a HIGH risk tool.
+                assertThatThrownBy(() -> statement.execute("INSERT INTO tool_definitions (code, name, description, category, risk, max_level, "
+                        + "required_level, execution_policy, mcp_server, mcp_tool) VALUES ('rogue.write', 'x', 'x', 'x', 'LOW', 'WRITE', 'WRITE', "
+                        + "'READ_ONLY', 's', 't')")).isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("INSERT INTO tool_definitions (code, name, description, category, risk, max_level, "
+                        + "required_level, execution_policy, mcp_server, mcp_tool) VALUES ('rogue.high', 'x', 'x', 'x', 'HIGH', 'READ', 'READ', "
+                        + "'READ_ONLY', 's', 't')")).isInstanceOf(java.sql.SQLException.class);
+                // The execution table accepts WAITING_APPROVAL and still refuses unknown states.
+                assertThat(statement.executeQuery("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_executions_status'")
+                        .next()).isTrue();
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM tool_invocations");
+                statement.execute("SELECT count(*) FROM tool_approvals");
+                assertThatThrownBy(() -> statement.execute("UPDATE tool_definitions SET execution_policy = 'READ_ONLY'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE tool_approvals ADD COLUMN x int"))
                         .isInstanceOf(java.sql.SQLException.class);
             }
         }

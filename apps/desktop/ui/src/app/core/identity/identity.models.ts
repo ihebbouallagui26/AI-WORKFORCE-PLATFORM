@@ -36,7 +36,9 @@ export type PermissionCode =
   | 'skill.read'
   | 'skill.manage'
   | 'agent.execute'
-  | 'agent.execution.read';
+  | 'agent.execution.read'
+  | 'approval.read'
+  | 'approval.decide';
 
 export type BuiltInRoleCode = 'OWNER' | 'ADMIN' | 'MEMBER';
 

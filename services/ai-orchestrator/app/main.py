@@ -14,11 +14,15 @@ from app.api.middleware import RequestContextMiddleware
 from app.api.routes import executions, health, runtime_info
 from app.clients.core_api_client import CoreApiClient, ServiceTokenProvider
 from app.core.config import Settings, get_settings
+from app.core.crypto import StateSealer
 from app.core.errors import UnavailableError
 from app.core.logging import configure_logging, get_logger
 from app.core.security import JwtVerifier
+from app.mcp.configuration import McpServerConfig
+from app.mcp.executor import McpServerManager
 from app.orchestration.checkpointer.postgres import open_postgres_checkpointer, ping
 from app.orchestration.executor import ExecutionRunner
+from app.orchestration.graphs.execution import ToolRuntime
 from app.orchestration.runtime import OrchestrationRuntime
 from app.providers.base import ProviderScope
 from app.providers.registry import ProviderRegistry
@@ -61,7 +65,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if settings.database_url is not None:
                 saver = await stack.enter_async_context(open_postgres_checkpointer(settings))
                 app.state.runtime = OrchestrationRuntime(saver, run_timeout_seconds=settings.run_timeout_seconds)
-                runner = ExecutionRunner(settings, app.state.core_api, providers, saver)
+                tool_runtime = None
+                if settings.tools_enabled:
+                    manager = McpServerManager(
+                        [McpServerConfig(name=name, server_id=name, timeout_seconds=settings.mcp_timeout_seconds)  # type: ignore[arg-type]
+                         for name in settings.mcp_servers],
+                        max_concurrent_calls=settings.mcp_max_concurrent_calls,
+                    )
+                    stack.push_async_callback(manager.aclose)  # stops every MCP child process at shutdown
+                    tool_runtime = ToolRuntime(
+                        manager=manager, sealer=StateSealer(settings.state_key_bytes()), max_rounds=settings.tool_max_rounds,
+                        max_calls=settings.tool_max_calls_per_run, output_max_chars=settings.tool_output_max_chars,
+                    )
+                runner = ExecutionRunner(settings, app.state.core_api, providers, saver, tool_runtime)
                 app.state.executor = runner
                 stack.push_async_callback(runner.shutdown)  # cancels running executions before resources close
 

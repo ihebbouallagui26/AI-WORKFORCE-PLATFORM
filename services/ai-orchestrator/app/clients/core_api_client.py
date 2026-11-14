@@ -23,7 +23,14 @@ from uuid import UUID
 import httpx
 from pydantic import SecretStr, ValidationError
 
-from app.clients.contracts import AgentExecutionContext, ExecutionCredential, ExecutionStarted
+from app.clients.contracts import (
+    AgentExecutionContext,
+    ExecutionCredential,
+    ExecutionStarted,
+    ResumeInfo,
+    ToolCallDecision,
+    ToolCallStart,
+)
 from app.core.errors import ForbiddenError, NotFoundError, OrchestratorError, UnavailableError
 from app.core.logging import get_logger
 
@@ -200,6 +207,63 @@ class CoreApiClient:
     async def fail_execution(self, organization_id: UUID, execution_id: UUID, *, error_code: str, message: str) -> None:
         body = {"errorCode": error_code, "message": message}
         await self._request("POST", self._run_path(organization_id, execution_id, "fail"), json=body)
+
+    # ---- tool calls (C2). State-changing, so never retried ---------------------------------------
+
+    async def request_tool_call(
+        self,
+        organization_id: UUID,
+        execution_id: UUID,
+        *,
+        tool_call_id: str,
+        tool_code: str,
+        arguments: object,
+        reason: str | None,
+    ) -> ToolCallDecision:
+        """Asks the Core API to decide a call. It is the authority: denied, automatic or human approval."""
+        body = {"toolCallId": tool_call_id, "toolCode": tool_code, "arguments": arguments, "reason": reason}
+        payload = await self._request("POST", self._run_path(organization_id, execution_id, "tool-calls"), json=body)
+        try:
+            return ToolCallDecision.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
+
+    async def begin_tool_call(self, organization_id: UUID, execution_id: UUID, invocation_id: UUID) -> ToolCallStart:
+        """The single moment a call may start (revalidated by the Core API). A 409 means: do not run it."""
+        path = self._run_path(organization_id, execution_id, f"tool-calls/{invocation_id}/begin")
+        payload = await self._request("POST", path, json={})
+        try:
+            started = ToolCallStart.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
+        if started.invocation_id != invocation_id:
+            raise CoreApiInvalidResponse
+        return started
+
+    async def complete_tool_call(
+        self,
+        organization_id: UUID,
+        execution_id: UUID,
+        invocation_id: UUID,
+        *,
+        success: bool,
+        output: str,
+        truncated: bool,
+        error_code: str | None,
+        message: str | None,
+    ) -> None:
+        body = {"success": success, "output": output, "truncated": truncated, "errorCode": error_code, "message": message}
+        await self._request(
+            "POST", self._run_path(organization_id, execution_id, f"tool-calls/{invocation_id}/complete"), json=body
+        )
+
+    async def resume_execution(self, organization_id: UUID, execution_id: UUID) -> ResumeInfo:
+        """WAITING_APPROVAL to RUNNING, once per pause: a duplicate notification gets a 409."""
+        payload = await self._request("POST", self._run_path(organization_id, execution_id, "resume"), json={})
+        try:
+            return ResumeInfo.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
 
     # ---- transport --------------------------------------------------------------------------------
 

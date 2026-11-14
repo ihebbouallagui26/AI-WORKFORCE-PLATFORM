@@ -243,6 +243,12 @@ const ALLOWED_ROUTES: ReadonlyArray<{ readonly method: ApiMethod; readonly patte
   ['GET', `${ORG}/agents/${UUID}/executions`],
   ['GET', `${ORG}/executions`],
   ['GET', `${ORG}/executions/${UUID}`],
+  // Tool activity and human approvals (Sprint C2): reading, and deciding ONE approval. Never the /internal/** endpoints.
+  ['GET', `${ORG}/executions/${UUID}/tool-calls`],
+  ['GET', `${ORG}/approvals`],
+  ['GET', `${ORG}/approvals/${UUID}`],
+  ['POST', `${ORG}/approvals/${UUID}/approve`],
+  ['POST', `${ORG}/approvals/${UUID}/reject`],
   ['GET', `${ORG}/agents/${UUID}/memory-config`],
   ['PUT', `${ORG}/agents/${UUID}/memory-config`],
   ['GET', `${ORG}/skills`],
@@ -278,6 +284,8 @@ const ALLOWED_QUERY: Readonly<Record<string, RegExp>> = {
   category: /^[A-Za-z0-9 &/_.-]{1,40}$/,
   // Executions (Sprint C1).
   agentId: UUID_VALUE,
+  // Approvals (Sprint C2).
+  executionId: UUID_VALUE,
 };
 
 export const MAX_BODY_BYTES = 64 * 1024;

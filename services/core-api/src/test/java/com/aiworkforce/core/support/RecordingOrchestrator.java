@@ -29,6 +29,8 @@ public class RecordingOrchestrator {
     public static final class Gateway implements OrchestratorGateway {
 
         private final List<Dispatched> dispatched = new CopyOnWriteArrayList<>();
+        private final List<Dispatched> resumes = new CopyOnWriteArrayList<>();
+        private final AtomicBoolean resumeUnreachable = new AtomicBoolean();
         private final List<String> threads = new CopyOnWriteArrayList<>();
         private final AtomicInteger attempts = new AtomicInteger();
         private final AtomicBoolean unreachable = new AtomicBoolean();
@@ -57,6 +59,24 @@ public class RecordingOrchestrator {
                 throw new IllegalStateException("orchestrator unreachable");
             }
             dispatched.add(request);
+        }
+
+        @Override
+        public void resume(UUID organizationId, UUID executionId) {
+            if (resumeUnreachable.get()) {
+                throw new IllegalStateException("orchestrator unreachable");
+            }
+            resumes.add(new Dispatched(organizationId, executionId));
+        }
+
+        /** Resume notifications that reached the orchestrator (duplicates included). */
+        public List<Dispatched> resumes() {
+            return resumes;
+        }
+
+        /** Resume notifications fail while true (lost notification / orchestrator down). */
+        public void resumeUnreachable(boolean value) {
+            resumeUnreachable.set(value);
         }
 
         public List<Dispatched> dispatched() {
@@ -90,6 +110,8 @@ public class RecordingOrchestrator {
 
         public void reset() {
             dispatched.clear();
+            resumes.clear();
+            resumeUnreachable.set(false);
             threads.clear();
             attempts.set(0);
             unreachable.set(false);

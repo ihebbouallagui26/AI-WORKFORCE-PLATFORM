@@ -40,6 +40,7 @@ Port **8091** is the default (8090 is taken by unrelated software on some machin
 | `AIO_OIDC_ISSUER`, `AIO_OIDC_JWKS_URL`, `AIO_OIDC_AUDIENCE` | Keycloak local, `ai-orchestrator` | Verification of callers' tokens. |
 | `AIO_EXECUTION_ENABLED_PROVIDERS`, `AIO_EXECUTION_MAX_OUTPUT_TOKENS`, `AIO_MAX_CONCURRENT_EXECUTIONS` | `ANTHROPIC`, `1024`, `4` | Providers allowed to run an execution (OpenAI/Gemini adapters exist but are not enabled), output limit, concurrent runs (a full runtime answers 503). |
 | `AIO_ALLOWED_CALLER_CLIENT_IDS` | `ai-workforce-core-api` | Comma-separated service clients allowed to call this service. |
+| `AIO_STATE_ENCRYPTION_KEY` | none | Base64 of **32 random bytes** (AES-256-GCM). Seals the conversation of a run paused for a human approval before it is checkpointed. **Required in `prod`** (startup fails if missing or malformed); outside prod, without it tools are simply not offered. Never logged, never in the image, never in health/runtime endpoints. Must be identical on every replica and stable across restarts; no rotation yet. See `docs/architecture/STATE_ENCRYPTION.md`. |
 | `AIO_DATABASE_URL` | none | **Dedicated** runtime database (LangGraph checkpoints). Restricted role, never the Core API database. |
 | `AIO_REQUEST_TIMEOUT_SECONDS`, `AIO_MAX_REQUEST_BYTES`, `AIO_RUN_TIMEOUT_SECONDS`, `AIO_SHUTDOWN_GRACE_SECONDS` | 30, 1 MiB, 60, 10 | Limits. |
 | `AIO_ANTHROPIC_BASE_URL`, `AIO_OPENAI_BASE_URL`, `AIO_GOOGLE_BASE_URL` | official endpoints | Fixed, HTTPS only (loopback HTTP outside prod, for tests). |

@@ -50,7 +50,8 @@ public record AgentView(
     /** A tool of the global registry. */
     @Schema(name = "ToolDefinition")
     public record ToolView(String code, String name, String description, String category, ToolRisk risk,
-            ToolLevel maxLevel, String mcpServer, String mcpTool, boolean enabled) {
+            ToolLevel maxLevel, String mcpServer, String mcpTool, boolean enabled, ToolPolicy executionPolicy,
+            ToolLevel requiredLevel) {
     }
 
     @Schema(name = "AgentMemoryConfig")

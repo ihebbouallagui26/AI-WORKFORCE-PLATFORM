@@ -140,3 +140,7 @@ A user or desktop token is rejected in both places; a service token is rejected 
 ### 9.6 Limits and deferred work
 
 In-process tasks (no restart survival; the Core API reaper fails them), polling instead of push, no cancellation, no streaming, one provider (Anthropic), no tools/MCP/shell/files, no multi-agent, no approvals, no durable queue. C2: real tools and MCP authorization; C3: collaboration.
+
+### 9.7 Tools, approvals and sealed state (Sprint C2)
+
+Tool execution, human approval and the durable pause/resume are described in `docs/architecture/MCP_INTEGRATION_ARCHITECTURE.md`, `docs/architecture/APPROVAL_RECOVERY_ARCHITECTURE.md` and, for what is encrypted in checkpoints and how the key is provisioned, `docs/architecture/STATE_ENCRYPTION.md`.

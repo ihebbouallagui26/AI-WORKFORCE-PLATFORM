@@ -171,6 +171,12 @@ describe('resolveApiRequest', () => {
       { method: 'GET', path: `${base}/agents/${ORG}/executions`, query: { status: 'SUCCEEDED', page: 0, size: 10 } },
       { method: 'GET', path: `${base}/executions`, query: { agentId: ORG, status: 'FAILED' } },
       { method: 'GET', path: `${base}/executions/${ORG}` },
+      // Tool activity and human approvals (Sprint C2).
+      { method: 'GET', path: `${base}/executions/${ORG}/tool-calls`, query: { page: 0, size: 50 } },
+      { method: 'GET', path: `${base}/approvals`, query: { status: 'PENDING', executionId: ORG, page: 0, size: 20 } },
+      { method: 'GET', path: `${base}/approvals/${ORG}` },
+      { method: 'POST', path: `${base}/approvals/${ORG}/approve`, body: { argumentsHash: 'a'.repeat(64) } },
+      { method: 'POST', path: `${base}/approvals/${ORG}/reject`, body: { reason: 'Not now' } },
     ];
     for (const request of allowed) {
       assert.ok(resolveApiRequest(request, API).ok, JSON.stringify(request));
@@ -194,6 +200,22 @@ describe('resolveApiRequest', () => {
       { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/complete`, body: { result: 'x' } },
       { method: 'GET', path: `/api/v1/internal/organizations/${ORG}/agents/${ORG}/execution-context` },
       { method: 'GET', path: `${base}/executions`, query: { agentId: 'not-a-uuid' } },
+      // Approvals: decide one request only; no edit, delete, bulk or cancel; no service endpoint; malformed identifiers.
+      { method: 'DELETE', path: `${base}/approvals/${ORG}` },
+      { method: 'PUT', path: `${base}/approvals/${ORG}`, body: {} },
+      { method: 'POST', path: `${base}/approvals`, body: {} },
+      { method: 'POST', path: `${base}/approvals/approve-all`, body: {} },
+      { method: 'POST', path: `${base}/approvals/${ORG}/cancel`, body: {} },
+      { method: 'GET', path: `${base}/approvals/${ORG}/approve` },
+      { method: 'POST', path: `${base}/approvals/not-a-uuid/approve`, body: {} },
+      { method: 'GET', path: `${base}/approvals`, query: { executionId: 'not-a-uuid' } },
+      { method: 'GET', path: `${base}/approvals`, query: { executionId: `${ORG}' OR 1=1` } },
+      { method: 'POST', path: `${base}/executions/${ORG}/tool-calls`, body: {} },
+      { method: 'POST', path: `${base}/executions/${ORG}/resume`, body: {} },
+      { method: 'GET', path: `${base}/tool-invocations` },
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/tool-calls`, body: {} },
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/resume`, body: {} },
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/tool-calls/${ORG}/begin`, body: {} },
       { method: 'GET', path: `${base}/agents`, query: { type: 'openai' } },
       { method: 'GET', path: `${base}/skills`, query: { category: '<script>' } },
       { method: 'GET', path: `${base}/skills`, query: { active: 'maybe' } },
