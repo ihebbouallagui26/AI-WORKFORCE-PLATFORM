@@ -257,31 +257,133 @@ describe('Agent execution panel', () => {
   });
 });
 
-describe('Agent detail integration', () => {
-  it('shows the execution panel inside the agent detail', async () => {
-    const desktop = new FakeDesktop();
-    desktop.handler = (request) => {
-      if (request.path.endsWith(`/agents/${id(1)}`)) return ok(detail(1));
-      if (request.path.endsWith('/history')) return ok(page([]));
-      if (request.path.endsWith('/executions')) return ok(page([]));
-      return ok(page([]));
-    };
-    desktop.install();
-    TestBed.configureTestingModule({
-      providers: [
-        provideZonelessChangeDetection(),
-        provideRouter([]),
-        { provide: AUTH_REQUIRED, useValue: true },
-        { provide: WorkspaceStore, useValue: { currentOrganizationId: signal<string | null>(ORG_A) } },
-        { provide: AccessStore, useValue: { can: (p: PermissionCode) => RUN.includes(p), organization: signal({ name: 'Acme' }), reload: () => undefined } },
-      ],
-    });
-    const fixture = TestBed.createComponent(AgentDetailPanel);
-    fixture.componentRef.setInput('agentId', id(1));
+/** Lets timers and effects run without waiting for requests that stay pending on purpose. */
+async function flush(fixture: ComponentFixture<unknown>): Promise<void> {
+  for (let i = 0; i < 8; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    TestBed.tick();
     fixture.detectChanges();
+  }
+}
+
+/**
+ * A fake Core API that follows the REAL response contracts (agents.api.ts): lists are `Page` wrappers,
+ * but the tool catalog is a plain `ToolDefinition[]`. Unknown routes answer 404 so that a request the
+ * component should not make, or a wrongly shaped fixture, cannot go unnoticed.
+ */
+function contractHandler(overrides: { executions?: () => ApiResponse | Promise<ApiResponse> } = {}) {
+  return (request: ApiRequest): ApiResponse | Promise<ApiResponse> => {
+    const path = request.path;
+    if (request.method !== 'GET') return { status: 404, body: { detail: 'unexpected write' } };
+    if (path.endsWith(`/agents/${id(1)}`)) return ok(detail(1));
+    if (path.endsWith(`/agents/${id(1)}/executions`)) return overrides.executions?.() ?? ok(page([]));
+    if (path.endsWith(`/agents/${id(1)}/history`)) return ok(page([]));
+    if (path.endsWith('/tools')) return ok([]); // ToolDefinition[]: NOT a page
+    if (path.endsWith('/skills')) return ok(page([]));
+    if (path.endsWith('/providers/connections')) return ok(page([]));
+    return { status: 404, body: { detail: `unexpected request ${request.method} ${path}` } };
+  };
+}
+
+async function mountDetail(handler: (request: ApiRequest) => ApiResponse | Promise<ApiResponse>, permissions: PermissionCode[] = RUN) {
+  const desktop = new FakeDesktop();
+  desktop.handler = handler;
+  desktop.install();
+  TestBed.configureTestingModule({
+    providers: [
+      provideZonelessChangeDetection(),
+      provideRouter([]),
+      { provide: AUTH_REQUIRED, useValue: true },
+      { provide: WorkspaceStore, useValue: { currentOrganizationId: signal<string | null>(ORG_A) } },
+      { provide: AccessStore, useValue: { can: (p: PermissionCode) => permissions.includes(p), organization: signal({ name: 'Acme' }), reload: () => undefined } },
+    ],
+  });
+  const fixture = TestBed.createComponent(AgentDetailPanel);
+  fixture.componentRef.setInput('agentId', id(1));
+  fixture.detectChanges();
+  return { desktop, fixture, el: fixture.nativeElement as HTMLElement };
+}
+
+describe('Agent detail integration', () => {
+  let errors: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    // Angular reports rendering errors (such as a non-iterable @for) through console.error.
+    errors = vi.spyOn(console, 'error');
+  });
+
+  afterEach(() => {
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it('shows the execution panel with an empty history and no rendering error', async () => {
+    const { fixture, el } = await mountDetail(contractHandler());
     await settle(fixture);
-    const el = fixture.nativeElement as HTMLElement;
     expect(text(el)).toContain('Run this agent');
     expect(el.querySelector('#exec-task')).not.toBeNull();
+    expect(el.querySelector('[data-testid=exec-empty]')).not.toBeNull();
+    expect(text(el)).toContain('Tool permissions');
+  });
+
+  it('renders one or more executions of the history', async () => {
+    const { fixture, el } = await mountDetail(
+      contractHandler({ executions: () => ok(page([execution(11, 'SUCCEEDED', { result: 'r' }), execution(12, 'FAILED', { errorMessage: 'e' })])) }),
+    );
+    await settle(fixture);
+    expect(el.querySelectorAll('button.link')).toHaveLength(2);
+    expect(text(el)).toContain('task 11');
+    expect(text(el)).toContain('task 12');
+    expect(el.querySelector('[data-testid=exec-empty]')).toBeNull();
+  });
+
+  it('shows the loading state while the history is requested, then the result', async () => {
+    let release!: (response: ApiResponse) => void;
+    const pending = new Promise<ApiResponse>((resolve) => (release = resolve));
+    const { fixture, el } = await mountDetail(contractHandler({ executions: () => pending }));
+    await flush(fixture); // does not wait for stability: the history request is deliberately still pending
+    expect(el.querySelector('ui-skeleton')).not.toBeNull();
+    expect(el.querySelector('[data-testid=exec-empty]')).toBeNull();
+    release(ok(page([execution(11, 'SUCCEEDED')])));
+    await settle(fixture);
+    expect(text(el)).toContain('task 11');
+  });
+
+  it('handles an empty API response', async () => {
+    const { fixture, el } = await mountDetail(contractHandler({ executions: () => ok({ content: [], page: 0, size: 10, totalElements: 0, totalPages: 0 }) }));
+    await settle(fixture);
+    expect(el.querySelector('[data-testid=exec-empty]')).not.toBeNull();
+  });
+
+  it('shows an error state when the history request fails, without breaking the rest of the panel', async () => {
+    const { fixture, el } = await mountDetail(contractHandler({ executions: () => ({ status: 500, body: { detail: 'Request failed (500).' } }) }));
+    await settle(fixture);
+    expect(text(el)).toContain('History unavailable');
+    expect(el.querySelector('#exec-task')).not.toBeNull();
+  });
+
+  it('uses the same response shapes as the real API contract', async () => {
+    const desktop = new FakeDesktop();
+    desktop.handler = contractHandler();
+    desktop.install(); // before injection: the backend client captures the bridge when it is created
+    setupApiOnly();
+    const api = TestBed.inject(AgentsApi);
+    // The tool catalog is an array, every list endpoint is a page whose `content` is an array.
+    expect(Array.isArray(await api.toolCatalog(ORG_A))).toBe(true);
+    expect(Array.isArray((await api.listSkills(ORG_A)).content)).toBe(true);
+    expect(Array.isArray((await api.listConnections(ORG_A)).content)).toBe(true);
+    expect(Array.isArray((await api.listExecutions(ORG_A, id(1))).content)).toBe(true);
   });
 });
+
+function setupApiOnly(): void {
+  TestBed.configureTestingModule({
+    providers: [
+      provideZonelessChangeDetection(),
+      provideRouter([]),
+      { provide: AUTH_REQUIRED, useValue: true },
+      { provide: WorkspaceStore, useValue: { currentOrganizationId: signal<string | null>(ORG_A) } },
+      { provide: AccessStore, useValue: { can: () => true, organization: signal({ name: 'Acme' }), reload: () => undefined } },
+    ],
+  });
+}
