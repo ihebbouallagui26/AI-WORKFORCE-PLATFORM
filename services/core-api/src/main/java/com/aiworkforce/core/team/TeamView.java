@@ -17,6 +17,7 @@ public record TeamView(
         EmployeeRef leader,
         ArchiveStatus status,
         long memberCount,
+        long agentCount,
         Instant createdAt,
         Instant updatedAt,
         long version) {

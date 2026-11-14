@@ -45,12 +45,12 @@ public class DepartmentController {
 
     @Schema(name = "Department")
     public record DepartmentResponse(UUID id, String name, String code, String description, UUID parentId,
-            EmployeeRef head, ArchiveStatus status, long employeeCount, long childCount, Instant createdAt,
+            EmployeeRef head, ArchiveStatus status, long employeeCount, long agentCount, long childCount, Instant createdAt,
             Instant updatedAt, long version) {
 
         static DepartmentResponse of(DepartmentView v) {
             return new DepartmentResponse(v.id(), v.name(), v.code(), v.description(), v.parentId(), v.head(),
-                    v.status(), v.employeeCount(), v.childCount(), v.createdAt(), v.updatedAt(), v.version());
+                    v.status(), v.employeeCount(), v.agentCount(), v.childCount(), v.createdAt(), v.updatedAt(), v.version());
         }
     }
 

@@ -10,5 +10,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 @TenantScoped
 interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
 
+    Page<AuditEvent> findByOrganizationIdAndTargetTypeAndTargetIdOrderByOccurredAtDesc(
+            UUID organizationId, String targetType, UUID targetId, Pageable pageable);
+
     Page<AuditEvent> findByOrganizationIdOrderByOccurredAtDesc(UUID organizationId, Pageable pageable);
 }

@@ -22,7 +22,11 @@ while IFS= read -r line || [ -n "$line" ]; do
     continue
   fi
   if [ -z "$value" ]; then
-    value="$(openssl rand -hex 24)"
+    if [ "$key" = "SECRETS_MASTER_KEY" ]; then
+      value="$(openssl rand -base64 32)"   # 32 random bytes, base64 (AES-256 key)
+    else
+      value="$(openssl rand -hex 24)"
+    fi
   fi
   printf '%s=%s\n' "$key" "$value" >> "$target"
   added+=("$key")

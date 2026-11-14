@@ -126,7 +126,7 @@ class ArchitectureTest {
             .that().resideInAnyPackage(CORE + "identity..", CORE + "auth..", CORE + "audit..", CORE + "access..",
                     CORE + "organization..", CORE + "invitation..")
             .should().dependOnClassesThat().resideInAnyPackage(CORE + "department..", CORE + "position..",
-                    CORE + "employee..", CORE + "team..", CORE + "workforce..")
+                    CORE + "employee..", CORE + "team..", CORE + "workforce..", CORE + "agent..", CORE + "provider..")
             .because("authorization and tenancy do not depend on the HR domain built on top of them");
 
     @ArchTest
@@ -136,6 +136,42 @@ class ArchitectureTest {
             .and().haveSimpleNameEndingWith("Service")
             .should().dependOnClassesThat().haveFullyQualifiedName(CORE + "access.TenantAccessService")
             .because("every workforce service starts operations with the membership and permission check");
+
+    // ---- AI agents and providers (Sprint B3) ----
+
+    @ArchTest
+    static final ArchRule humanWorkforceModulesKnowNothingOfAgentsOrProviders = noClasses()
+            .that().resideInAnyPackage(CORE + "department..", CORE + "position..", CORE + "employee..", CORE + "team..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "agent..", CORE + "provider..")
+            .because("agents reach them through ports (AgentDirectory) and TeamDirectory, never the reverse");
+
+    @ArchTest
+    static final ArchRule providersDependOnNoWorkforceModuleNorOnAgents = noClasses()
+            .that().resideInAPackage(CORE + "provider..")
+            .should().dependOnClassesThat().resideInAnyPackage(CORE + "agent..", CORE + "department..", CORE + "position..",
+                    CORE + "employee..", CORE + "team..", CORE + "workforce..")
+            .because("provider connections are infrastructure: agents depend on them (ConnectionUsage is a port)");
+
+    @ArchTest
+    static final ArchRule onlyTheProviderModuleCanRevealASecret = noClasses()
+            .that().resideOutsideOfPackage(CORE + "provider..")
+            .should().callMethod(com.aiworkforce.core.provider.SecretStore.class, "reveal", java.util.UUID.class, java.util.UUID.class)
+            .because("credentials are decrypted only by the provider adapters, never elsewhere");
+
+    @ArchTest
+    static final ArchRule agentsNeverTouchTheSecretStore = noClasses()
+            .that().resideInAPackage(CORE + "agent..")
+            .should().dependOnClassesThat().haveSimpleName("SecretStore")
+            .because("an agent references a provider connection, never a credential");
+
+    @ArchTest
+    static final ArchRule agentAndProviderServicesAlwaysCheckTheTenantFirst = classes()
+            .that().areAnnotatedWith(Service.class)
+            .and().resideInAnyPackage(CORE + "agent..", CORE + "provider..")
+            .and().haveSimpleNameEndingWith("Service")
+            .and().doNotHaveSimpleName("AesGcmSecretStore")
+            .should().dependOnClassesThat().haveFullyQualifiedName(CORE + "access.TenantAccessService")
+            .because("every operation starts with the membership and permission check");
 
     @ArchTest
     static final ArchRule noFieldInjection = noFields()

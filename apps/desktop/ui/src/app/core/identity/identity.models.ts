@@ -22,7 +22,19 @@ export type PermissionCode =
   | 'position.read'
   | 'position.manage'
   | 'team.read'
-  | 'team.manage';
+  | 'team.manage'
+  | 'agent.read'
+  | 'agent.create'
+  | 'agent.manage'
+  | 'agent.activate'
+  | 'agent.archive'
+  | 'agent.tool.manage'
+  | 'provider.read'
+  | 'provider.connect'
+  | 'provider.manage'
+  | 'provider.test'
+  | 'skill.read'
+  | 'skill.manage';
 
 export type BuiltInRoleCode = 'OWNER' | 'ADMIN' | 'MEMBER';
 

@@ -68,8 +68,8 @@ export class BackendClient {
     return this.send<T>('PATCH', path, body);
   }
 
-  delete(path: string): Promise<void> {
-    return this.send<void>('DELETE', path);
+  delete<T = void>(path: string): Promise<T> {
+    return this.send<T>('DELETE', path);
   }
 
   private async send<T>(method: ApiMethod, path: string, body?: unknown, query?: ApiRequest['query']): Promise<T> {

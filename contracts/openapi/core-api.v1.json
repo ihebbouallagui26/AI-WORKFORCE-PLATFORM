@@ -9,14 +9,11 @@
     "bearerAuth" : [ ]
   } ],
   "tags" : [ {
-    "name" : "Departments",
-    "description" : "Organizational units"
-  }, {
     "name" : "Invitations",
     "description" : "Invitations to join an organization"
   }, {
-    "name" : "Health",
-    "description" : "Application availability"
+    "name" : "Skills and tools",
+    "description" : "Reusable skills and the tool registry (metadata, no execution)"
   }, {
     "name" : "Employees",
     "description" : "Employee profiles (professional identity, separate from platform access)"
@@ -30,11 +27,29 @@
     "name" : "Roles",
     "description" : "Organization roles and permissions"
   }, {
+    "name" : "AI agents",
+    "description" : "AI employees: identity, lifecycle and configuration (no execution yet)"
+  }, {
     "name" : "Positions",
     "description" : "Professional job titles (not authorization roles)"
   }, {
     "name" : "Teams",
     "description" : "Collaborative groups of employees"
+  }, {
+    "name" : "Departments",
+    "description" : "Organizational units"
+  }, {
+    "name" : "Team agents",
+    "description" : "AI agents participating in teams"
+  }, {
+    "name" : "Health",
+    "description" : "Application availability"
+  }, {
+    "name" : "AI agent configuration",
+    "description" : "Providers, skills, tools and memory of an agent"
+  }, {
+    "name" : "AI providers",
+    "description" : "Organization provider connections (credentials are write-only)"
   }, {
     "name" : "Members",
     "description" : "Organization memberships"
@@ -125,6 +140,52 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/Team"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/credential" : {
+      "put" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Replace the credential; the connection becomes PENDING (provider.manage)",
+        "operationId" : "replaceCredential",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReplaceProviderCredentialRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProviderConnection"
                 }
               }
             }
@@ -546,6 +607,304 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/tools" : {
+      "get" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Tools granted to the agent (agent.read)",
+        "operationId" : "grants",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentToolGrant"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Replace the tool grants; nothing is executed (agent.tool.manage)",
+        "operationId" : "setGrants",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetAgentToolsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentToolGrant"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/skills" : {
+      "get" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Skills of the agent (agent.read)",
+        "operationId" : "skills",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentSkillReference"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Replace the skills of the agent (agent.manage + skill.read)",
+        "operationId" : "setSkills",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetAgentSkillsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentSkillReference"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/memory-config" : {
+      "get" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Memory policy of the agent (agent.read)",
+        "operationId" : "memory",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentMemoryConfig"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Set the memory policy; configuration only, no memory engine yet (agent.manage)",
+        "operationId" : "setMemory",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetAgentMemoryConfigRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentMemoryConfig"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/department" : {
+      "put" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Assign or clear the department (agent.manage)",
+        "operationId" : "changeDepartment_2",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AssignAgentDepartmentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations" : {
       "get" : {
         "tags" : [ "Organizations" ],
@@ -887,11 +1246,212 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/teams/{teamId}/agents" : {
+      "get" : {
+        "tags" : [ "Team agents" ],
+        "summary" : "AI agents of the team, optionally with former ones (agent.read)",
+        "operationId" : "list_2",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "teamId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "includeFormer",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/TeamAgent"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "Team agents" ],
+        "summary" : "Add an agent to the team; archived agents and teams are refused (team.manage + agent.read)",
+        "operationId" : "add",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "teamId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AddTeamAgentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TeamAgent"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/skills" : {
+      "get" : {
+        "tags" : [ "Skills and tools" ],
+        "summary" : "List skills (skill.read)",
+        "operationId" : "list_3",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          }
+        }, {
+          "name" : "active",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean"
+          }
+        }, {
+          "name" : "category",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseSkill"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "Skills and tools" ],
+        "summary" : "Create a skill (skill.manage)",
+        "operationId" : "create_2",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateSkillRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Skill"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/roles" : {
       "get" : {
         "tags" : [ "Roles" ],
         "summary" : "List the roles of an organization (role.read)",
-        "operationId" : "list_2",
+        "operationId" : "list_4",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -920,7 +1480,7 @@
       "post" : {
         "tags" : [ "Roles" ],
         "summary" : "Create a custom role (role.manage; only permissions the caller holds)",
-        "operationId" : "create_2",
+        "operationId" : "create_3",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -954,11 +1514,148 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/providers/connections" : {
+      "get" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "List provider connections (provider.read)",
+        "operationId" : "list_5",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "type",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "VALID", "INVALID", "REVOKED" ]
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseProviderConnection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Create a provider connection; it stays PENDING until tested (provider.connect)",
+        "operationId" : "create_4",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateProviderConnectionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProviderConnection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/test" : {
+      "post" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Validate the credential with a read-only provider call, no completion (provider.test)",
+        "operationId" : "test",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProviderConnectionTestResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/positions" : {
       "get" : {
         "tags" : [ "Positions" ],
         "summary" : "List positions (position.read)",
-        "operationId" : "list_3",
+        "operationId" : "list_6",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1030,7 +1727,7 @@
       "post" : {
         "tags" : [ "Positions" ],
         "summary" : "Create a position (position.manage)",
-        "operationId" : "create_3",
+        "operationId" : "create_5",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1212,7 +1909,7 @@
       "get" : {
         "tags" : [ "Invitations" ],
         "summary" : "List pending invitations (invitation.read)",
-        "operationId" : "list_4",
+        "operationId" : "list_7",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1259,7 +1956,7 @@
       "post" : {
         "tags" : [ "Invitations" ],
         "summary" : "Invite someone by e-mail with a role the caller is allowed to grant (invitation.create)",
-        "operationId" : "create_4",
+        "operationId" : "create_6",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1297,7 +1994,7 @@
       "get" : {
         "tags" : [ "Employees" ],
         "summary" : "List and search employees (employee.read)",
-        "operationId" : "list_5",
+        "operationId" : "list_8",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1385,7 +2082,7 @@
       "post" : {
         "tags" : [ "Employees" ],
         "summary" : "Create an employee profile, optionally linked to a membership (employee.create)",
-        "operationId" : "create_5",
+        "operationId" : "create_7",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1423,7 +2120,7 @@
       "get" : {
         "tags" : [ "Departments" ],
         "summary" : "List departments (department.read)",
-        "operationId" : "list_6",
+        "operationId" : "list_9",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1503,7 +2200,7 @@
       "post" : {
         "tags" : [ "Departments" ],
         "summary" : "Create a department (department.manage)",
-        "operationId" : "create_6",
+        "operationId" : "create_8",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1602,6 +2299,310 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/Department"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents" : {
+      "get" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "List and search AI agents (agent.read)",
+        "operationId" : "list_10",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "DRAFT", "ACTIVE", "PAUSED", "ARCHIVED" ]
+          }
+        }, {
+          "name" : "departmentId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAgentSummary"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Create an AI agent in DRAFT status (agent.create)",
+        "operationId" : "create_9",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateAgentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/providers" : {
+      "get" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Provider bindings of the agent: one primary, ordered fallbacks (agent.read)",
+        "operationId" : "bindings",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentProviderBinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Bind a provider connection and model (agent.manage + provider.read)",
+        "operationId" : "addBinding",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/BindAgentProviderRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentProviderBinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/pause" : {
+      "post" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Pause an active agent (agent.activate)",
+        "operationId" : "pause",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/archive" : {
+      "post" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Archive the agent for good: it leaves its teams and is frozen (agent.archive)",
+        "operationId" : "archive_3",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/activate" : {
+      "post" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Activate: needs a tested, valid primary provider. Does not start any execution (agent.activate)",
+        "operationId" : "activate",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
                 }
               }
             }
@@ -1782,6 +2783,79 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/skills/{skillId}" : {
+      "delete" : {
+        "tags" : [ "Skills and tools" ],
+        "summary" : "Delete a skill assigned to no agent; otherwise deactivate it (skill.manage)",
+        "operationId" : "delete",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "skillId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [ "Skills and tools" ],
+        "summary" : "Update or (de)activate a skill (skill.manage)",
+        "operationId" : "update_2",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "skillId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateSkillRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Skill"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/roles/{roleId}" : {
       "get" : {
         "tags" : [ "Roles" ],
@@ -1820,7 +2894,7 @@
       "delete" : {
         "tags" : [ "Roles" ],
         "summary" : "Delete an unassigned custom role (role.manage)",
-        "operationId" : "delete",
+        "operationId" : "delete_1",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1847,7 +2921,7 @@
       "patch" : {
         "tags" : [ "Roles" ],
         "summary" : "Update a custom role (role.manage; built-in roles are immutable)",
-        "operationId" : "update_2",
+        "operationId" : "update_3",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1889,11 +2963,118 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/providers/connections/{connectionId}" : {
+      "get" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Get a provider connection (provider.read)",
+        "operationId" : "get_3",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProviderConnection"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Revoke the connection and delete its credential for good (provider.manage)",
+        "operationId" : "revoke",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Update display name or account identifier (provider.manage)",
+        "operationId" : "update_4",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateProviderConnectionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProviderConnection"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/positions/{positionId}" : {
       "get" : {
         "tags" : [ "Positions" ],
         "summary" : "Get a position (position.read)",
-        "operationId" : "get_3",
+        "operationId" : "get_4",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1927,7 +3108,7 @@
       "delete" : {
         "tags" : [ "Positions" ],
         "summary" : "Delete a position that was never held; otherwise archive it (position.manage)",
-        "operationId" : "delete_1",
+        "operationId" : "delete_2",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -1954,7 +3135,7 @@
       "patch" : {
         "tags" : [ "Positions" ],
         "summary" : "Update title, code or description (position.manage)",
-        "operationId" : "update_3",
+        "operationId" : "update_5",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2000,7 +3181,7 @@
       "get" : {
         "tags" : [ "Employees" ],
         "summary" : "Get an employee profile (employee.read)",
-        "operationId" : "get_4",
+        "operationId" : "get_5",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2034,7 +3215,7 @@
       "patch" : {
         "tags" : [ "Employees" ],
         "summary" : "Update the scalar fields of an employee (employee.manage)",
-        "operationId" : "update_4",
+        "operationId" : "update_6",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2080,7 +3261,7 @@
       "get" : {
         "tags" : [ "Departments" ],
         "summary" : "Get a department (department.read)",
-        "operationId" : "get_5",
+        "operationId" : "get_6",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2114,7 +3295,7 @@
       "delete" : {
         "tags" : [ "Departments" ],
         "summary" : "Delete a department that was never used; otherwise archive it (department.manage)",
-        "operationId" : "delete_2",
+        "operationId" : "delete_3",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2141,7 +3322,7 @@
       "patch" : {
         "tags" : [ "Departments" ],
         "summary" : "Update name, code or description (department.manage)",
-        "operationId" : "update_5",
+        "operationId" : "update_7",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2183,6 +3364,188 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}" : {
+      "get" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Get an agent with its configuration; system instructions need agent.manage (agent.read)",
+        "operationId" : "get_7",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Update the agent identity: name, title, description, responsibilities, instructions (agent.manage)",
+        "operationId" : "update_8",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateAgentRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AgentDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/providers/{bindingId}" : {
+      "delete" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Remove a provider binding (agent.manage)",
+        "operationId" : "removeBinding",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "bindingId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentProviderBinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [ "AI agent configuration" ],
+        "summary" : "Change model, options or priority, or promote a fallback to primary (agent.manage + provider.read)",
+        "operationId" : "updateBinding",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "bindingId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateAgentProviderBindingRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/AgentProviderBinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me" : {
       "get" : {
         "tags" : [ "Me" ],
@@ -2204,7 +3567,7 @@
       "patch" : {
         "tags" : [ "Me" ],
         "summary" : "Update the authenticated user's display name",
-        "operationId" : "update_6",
+        "operationId" : "update_9",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -2222,6 +3585,28 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/UserProfile"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/types" : {
+      "get" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "List the supported provider types",
+        "operationId" : "types",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ProviderType"
+                  }
                 }
               }
             }
@@ -2251,11 +3636,81 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/tools" : {
+      "get" : {
+        "tags" : [ "Skills and tools" ],
+        "summary" : "The tool registry: metadata for future MCP integration, nothing executable (agent.read)",
+        "operationId" : "tools",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ToolDefinition"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/models" : {
+      "get" : {
+        "tags" : [ "AI providers" ],
+        "summary" : "Models reported by the provider for this connection (provider.test)",
+        "operationId" : "models",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "connectionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/ProviderModel"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/members" : {
       "get" : {
         "tags" : [ "Members" ],
         "summary" : "List members (member.read)",
-        "operationId" : "list_7",
+        "operationId" : "list_11",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2312,7 +3767,7 @@
       "get" : {
         "tags" : [ "Members" ],
         "summary" : "Get a member (member.read)",
-        "operationId" : "get_6",
+        "operationId" : "get_8",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2498,6 +3953,63 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/agents/{agentId}/history" : {
+      "get" : {
+        "tags" : [ "AI agents" ],
+        "summary" : "Configuration history of the agent, newest first (agent.read)",
+        "operationId" : "history",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseAgentHistoryEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health" : {
       "get" : {
         "tags" : [ "Health" ],
@@ -2566,11 +4078,48 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/teams/{teamId}/agents/{agentId}" : {
+      "delete" : {
+        "tags" : [ "Team agents" ],
+        "summary" : "Remove an agent from the team; history is kept (team.manage)",
+        "operationId" : "remove_1",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "teamId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "agentId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/invitations/{invitationId}" : {
       "delete" : {
         "tags" : [ "Invitations" ],
         "summary" : "Revoke a pending invitation (invitation.revoke)",
-        "operationId" : "revoke",
+        "operationId" : "revoke_1",
         "parameters" : [ {
           "name" : "organizationId",
           "in" : "path",
@@ -2670,6 +4219,10 @@
             "type" : "integer",
             "format" : "int64"
           },
+          "agentCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
           "createdAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -2691,6 +4244,65 @@
           "departmentId" : {
             "type" : "string",
             "format" : "uuid"
+          }
+        }
+      },
+      "ReplaceProviderCredentialRequest" : {
+        "type" : "object",
+        "properties" : {
+          "credential" : {
+            "type" : "string",
+            "description" : "Write-only secret. Stored encrypted, never returned.",
+            "maxLength" : 512,
+            "minLength" : 8,
+            "pattern" : "^[!-~]+$",
+            "writeOnly" : true
+          }
+        },
+        "required" : [ "credential" ]
+      },
+      "ProviderConnection" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "providerType" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
+          },
+          "providerName" : {
+            "type" : "string"
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "accountIdentifier" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "VALID", "INVALID", "REVOKED" ]
+          },
+          "statusDetail" : {
+            "type" : "string"
+          },
+          "lastTestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },
@@ -2988,6 +4600,10 @@
             "type" : "integer",
             "format" : "int64"
           },
+          "agentCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
           "childCount" : {
             "type" : "integer",
             "format" : "int64"
@@ -3013,6 +4629,329 @@
           "employeeId" : {
             "type" : "string",
             "format" : "uuid"
+          }
+        }
+      },
+      "AgentToolGrantInput" : {
+        "type" : "object",
+        "properties" : {
+          "toolCode" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[a-z][a-z0-9_.-]{1,59}$"
+          },
+          "level" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "approvalRequired" : {
+            "type" : "boolean",
+            "description" : "Mandatory (true) for high-risk tools."
+          },
+          "projectId" : {
+            "type" : "string",
+            "format" : "uuid",
+            "description" : "Reserved: per-project scope is not available yet and must be null."
+          }
+        },
+        "required" : [ "level", "toolCode" ]
+      },
+      "SetAgentToolsRequest" : {
+        "type" : "object",
+        "description" : "Replaces the tool grants (least privilege: none by default).",
+        "properties" : {
+          "grants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentToolGrantInput"
+            },
+            "maxItems" : 20,
+            "minItems" : 0
+          }
+        },
+        "required" : [ "grants" ]
+      },
+      "AgentToolGrant" : {
+        "type" : "object",
+        "properties" : {
+          "toolCode" : {
+            "type" : "string"
+          },
+          "toolName" : {
+            "type" : "string"
+          },
+          "risk" : {
+            "type" : "string",
+            "enum" : [ "LOW", "MEDIUM", "HIGH" ]
+          },
+          "maxLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "level" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "approvalRequired" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "SetAgentSkillsRequest" : {
+        "type" : "object",
+        "description" : "Replaces the skills of the agent.",
+        "properties" : {
+          "skillIds" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "maxItems" : 30,
+            "minItems" : 0,
+            "uniqueItems" : true
+          }
+        },
+        "required" : [ "skillIds" ]
+      },
+      "AgentSkillReference" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "active" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "SetAgentMemoryConfigRequest" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "scope" : {
+            "type" : "string",
+            "enum" : [ "PROJECT", "ORGANIZATION" ]
+          },
+          "accessMode" : {
+            "type" : "string",
+            "enum" : [ "AGENT_ONLY", "TEAM_MEMBERS", "ORGANIZATION_MEMBERS" ]
+          },
+          "retentionDays" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 3650,
+            "minimum" : 1
+          }
+        },
+        "required" : [ "accessMode", "scope" ]
+      },
+      "AgentMemoryConfig" : {
+        "type" : "object",
+        "properties" : {
+          "enabled" : {
+            "type" : "boolean"
+          },
+          "scope" : {
+            "type" : "string",
+            "enum" : [ "PROJECT", "ORGANIZATION" ]
+          },
+          "accessMode" : {
+            "type" : "string",
+            "enum" : [ "AGENT_ONLY", "TEAM_MEMBERS", "ORGANIZATION_MEMBERS" ]
+          },
+          "retentionDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "AssignAgentDepartmentRequest" : {
+        "type" : "object",
+        "description" : "A null departmentId removes the assignment.",
+        "properties" : {
+          "departmentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "AgentDetail" : {
+        "type" : "object",
+        "properties" : {
+          "agent" : {
+            "$ref" : "#/components/schemas/AgentSummary"
+          },
+          "systemInstructions" : {
+            "type" : "string"
+          },
+          "providers" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentProviderBinding"
+            }
+          },
+          "skills" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentSkillReference"
+            }
+          },
+          "tools" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentToolGrant"
+            }
+          },
+          "memory" : {
+            "$ref" : "#/components/schemas/AgentMemoryConfig"
+          },
+          "teams" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/TeamReference"
+            }
+          }
+        }
+      },
+      "AgentProviderBinding" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "connection" : {
+            "$ref" : "#/components/schemas/ProviderConnectionReference"
+          },
+          "modelId" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "PRIMARY", "FALLBACK" ]
+          },
+          "priority" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "config" : {
+            "type" : "string"
+          }
+        }
+      },
+      "AgentSummary" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "organizationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "handle" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "avatarTone" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "department" : {
+            "$ref" : "#/components/schemas/DepartmentReference"
+          },
+          "responsibilities" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "DRAFT", "ACTIVE", "PAUSED", "ARCHIVED" ]
+          },
+          "configVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "skillCount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "createdBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "ProviderConnectionReference" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "providerType" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
+          },
+          "displayName" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "VALID", "INVALID", "REVOKED" ]
+          }
+        }
+      },
+      "TeamReference" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "ARCHIVED" ]
           }
         }
       },
@@ -3148,6 +5087,86 @@
           }
         }
       },
+      "AddTeamAgentRequest" : {
+        "type" : "object",
+        "properties" : {
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "agentId" ]
+      },
+      "TeamAgent" : {
+        "type" : "object",
+        "properties" : {
+          "agent" : {
+            "$ref" : "#/components/schemas/AgentSummary"
+          },
+          "joinedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "leftAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "CreateSkillRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 60,
+            "minLength" : 2
+          },
+          "category" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 300,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "name" ]
+      },
+      "Skill" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "active" : {
+            "type" : "boolean"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "CreateRoleRequest" : {
         "type" : "object",
         "properties" : {
@@ -3199,6 +5218,49 @@
             "items" : {
               "type" : "string"
             }
+          }
+        }
+      },
+      "CreateProviderConnectionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "providerType" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
+          },
+          "displayName" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 2
+          },
+          "accountIdentifier" : {
+            "type" : "string",
+            "maxLength" : 200,
+            "minLength" : 0
+          },
+          "credential" : {
+            "type" : "string",
+            "description" : "Write-only secret. Stored encrypted, never returned.",
+            "maxLength" : 512,
+            "minLength" : 8,
+            "pattern" : "^[!-~]+$",
+            "writeOnly" : true
+          }
+        },
+        "required" : [ "credential", "displayName", "providerType" ]
+      },
+      "ProviderConnectionTestResult" : {
+        "type" : "object",
+        "properties" : {
+          "connection" : {
+            "$ref" : "#/components/schemas/ProviderConnection"
+          },
+          "outcome" : {
+            "type" : "string",
+            "enum" : [ "VALID", "INVALID", "UNAVAILABLE" ]
+          },
+          "message" : {
+            "type" : "string"
           }
         }
       },
@@ -3353,6 +5415,110 @@
         },
         "required" : [ "code", "name" ]
       },
+      "CreateAgentRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 2
+          },
+          "handle" : {
+            "type" : "string",
+            "description" : "Unique identifier in the organization; derived from the name when omitted.",
+            "pattern" : "^[a-z0-9][a-z0-9-]{1,39}$"
+          },
+          "avatarTone" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 8,
+            "minimum" : 1
+          },
+          "title" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 1000,
+            "minLength" : 0
+          },
+          "departmentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "responsibilities" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "maxLength" : 200,
+              "minLength" : 0
+            },
+            "maxItems" : 20,
+            "minItems" : 0
+          },
+          "systemInstructions" : {
+            "type" : "string",
+            "maxLength" : 8000,
+            "minLength" : 0
+          }
+        },
+        "required" : [ "name" ]
+      },
+      "BindAgentProviderRequest" : {
+        "type" : "object",
+        "properties" : {
+          "connectionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "modelId" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$"
+          },
+          "role" : {
+            "type" : "string",
+            "enum" : [ "PRIMARY", "FALLBACK" ]
+          },
+          "priority" : {
+            "type" : "integer",
+            "format" : "int32",
+            "description" : "Fallbacks only; defaults to the next free priority (1, 2, ...).",
+            "maximum" : 100,
+            "minimum" : 1
+          },
+          "options" : {
+            "$ref" : "#/components/schemas/ProviderBindingOptions"
+          }
+        },
+        "required" : [ "connectionId", "modelId", "role" ]
+      },
+      "ProviderBindingOptions" : {
+        "type" : "object",
+        "description" : "Provider-specific generation options (allowlisted keys).",
+        "properties" : {
+          "temperature" : {
+            "type" : "number",
+            "format" : "double",
+            "maximum" : 2.0,
+            "minimum" : 0.0
+          },
+          "maxOutputTokens" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 1000000,
+            "minimum" : 1
+          },
+          "topP" : {
+            "type" : "number",
+            "format" : "double",
+            "maximum" : 1.0,
+            "minimum" : 0.0
+          }
+        }
+      },
       "AcceptInvitationRequest" : {
         "type" : "object",
         "properties" : {
@@ -3424,6 +5590,35 @@
           }
         }
       },
+      "UpdateSkillRequest" : {
+        "type" : "object",
+        "description" : "Omitted fields are left unchanged.",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 60,
+            "minLength" : 2,
+            "pattern" : ".*\\S.*"
+          },
+          "category" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 300,
+            "minLength" : 0
+          },
+          "active" : {
+            "type" : "boolean"
+          },
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "UpdateRoleRequest" : {
         "type" : "object",
         "description" : "Omitted fields are left unchanged.",
@@ -3449,6 +5644,27 @@
             "maxItems" : 50,
             "minItems" : 0,
             "uniqueItems" : true
+          }
+        }
+      },
+      "UpdateProviderConnectionRequest" : {
+        "type" : "object",
+        "description" : "Omitted fields are left unchanged.",
+        "properties" : {
+          "displayName" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 2,
+            "pattern" : ".*\\S.*"
+          },
+          "accountIdentifier" : {
+            "type" : "string",
+            "maxLength" : 200,
+            "minLength" : 0
+          },
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
           }
         }
       },
@@ -3541,6 +5757,77 @@
           }
         }
       },
+      "UpdateAgentRequest" : {
+        "type" : "object",
+        "description" : "Omitted fields are left unchanged.",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 2,
+            "pattern" : ".*\\S.*"
+          },
+          "avatarTone" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 8,
+            "minimum" : 1
+          },
+          "title" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 1000,
+            "minLength" : 0
+          },
+          "responsibilities" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "maxLength" : 200,
+              "minLength" : 0
+            },
+            "maxItems" : 20,
+            "minItems" : 0
+          },
+          "systemInstructions" : {
+            "type" : "string",
+            "maxLength" : 8000,
+            "minLength" : 0
+          },
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "When set, the update is refused (409) if the agent changed meanwhile."
+          }
+        }
+      },
+      "UpdateAgentProviderBindingRequest" : {
+        "type" : "object",
+        "description" : "Omitted fields are left unchanged.",
+        "properties" : {
+          "modelId" : {
+            "type" : "string",
+            "pattern" : "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$"
+          },
+          "options" : {
+            "$ref" : "#/components/schemas/ProviderBindingOptions"
+          },
+          "makePrimary" : {
+            "type" : "boolean",
+            "description" : "Promote this fallback to primary; the current primary becomes a fallback."
+          },
+          "priority" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        }
+      },
       "UpdateUserProfileRequest" : {
         "type" : "object",
         "properties" : {
@@ -3564,6 +5851,18 @@
           },
           "emailVerified" : {
             "type" : "boolean"
+          },
+          "displayName" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ProviderType" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "enum" : [ "ANTHROPIC", "OPENAI", "GEMINI" ]
           },
           "displayName" : {
             "type" : "string"
@@ -3630,6 +5929,40 @@
           }
         }
       },
+      "ToolDefinition" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "category" : {
+            "type" : "string"
+          },
+          "risk" : {
+            "type" : "string",
+            "enum" : [ "LOW", "MEDIUM", "HIGH" ]
+          },
+          "maxLevel" : {
+            "type" : "string",
+            "enum" : [ "READ", "WRITE", "EXECUTE" ]
+          },
+          "mcpServer" : {
+            "type" : "string"
+          },
+          "mcpTool" : {
+            "type" : "string"
+          },
+          "enabled" : {
+            "type" : "boolean"
+          }
+        }
+      },
       "PageResponseTeam" : {
         "type" : "object",
         "properties" : {
@@ -3668,6 +6001,71 @@
             "items" : {
               "$ref" : "#/components/schemas/TeamMember"
             }
+          }
+        }
+      },
+      "PageResponseSkill" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Skill"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseProviderConnection" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ProviderConnection"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "ProviderModel" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string"
+          },
+          "displayName" : {
+            "type" : "string"
           }
         }
       },
@@ -3860,6 +6258,83 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/AuditEvent"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseAgentSummary" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentSummary"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "AgentHistoryEntry" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "actorUserId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "string"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PageResponseAgentHistoryEntry" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/AgentHistoryEntry"
             }
           },
           "page" : {

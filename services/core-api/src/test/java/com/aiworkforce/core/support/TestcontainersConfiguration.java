@@ -30,6 +30,14 @@ public class TestcontainersConfiguration {
     public static final String APP_USER = "aiw_app";
     public static final String APP_PASSWORD = "test-app-password";
 
+    private static final String MASTER_KEY = randomMasterKey();
+
+    private static String randomMasterKey() {
+        byte[] key = new byte[32];
+        new java.security.SecureRandom().nextBytes(key);
+        return java.util.Base64.getEncoder().encodeToString(key);
+    }
+
     private static final Path INIT_ROLES_SCRIPT = Path.of("..", "..", "infra", "docker", "postgres", "init-roles.sh");
 
     @Bean
@@ -48,6 +56,8 @@ public class TestcontainersConfiguration {
             registry.add("spring.flyway.user", () -> MIGRATION_USER);
             registry.add("spring.flyway.password", () -> MIGRATION_PASSWORD);
             registry.add("spring.flyway.placeholders.app_role", () -> APP_USER);
+            // A random AES-256 master key per test JVM: no key is ever committed, not even for tests.
+            registry.add("app.secrets.master-key", () -> MASTER_KEY);
         };
     }
 

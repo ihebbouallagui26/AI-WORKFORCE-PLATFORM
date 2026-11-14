@@ -39,6 +39,13 @@ public class AuditLog {
                 MDC.get(RequestIdFilter.MDC_KEY), Instant.now(clock)));
     }
 
+    /** History of one target (e.g. an agent). Callers must have checked access to the organization first. */
+    @Transactional(readOnly = true)
+    public Page<AuditEntry> findForTarget(UUID organizationId, String targetType, UUID targetId, Pageable pageable) {
+        return events.findByOrganizationIdAndTargetTypeAndTargetIdOrderByOccurredAtDesc(organizationId, targetType,
+                targetId, pageable).map(AuditEntry::of);
+    }
+
     /** Callers must have checked the organization access and the audit permission first. */
     @Transactional(readOnly = true)
     public Page<AuditEntry> findForOrganization(UUID organizationId, Pageable pageable) {

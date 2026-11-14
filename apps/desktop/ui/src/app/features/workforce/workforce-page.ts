@@ -15,7 +15,7 @@ const TABS: readonly WorkforceTab[] = ['structure', 'employees', 'positions', 't
 
 /**
  * The organization's workforce, backed by the Core API: department hierarchy, employees,
- * positions and teams. AI agents are not part of it yet (Phase B3) and stay demo data elsewhere.
+ * positions and teams. AI agents are managed in their own section and listed apart in teams.
  */
 @Component({
   selector: 'app-workforce-page',
@@ -41,10 +41,10 @@ const TABS: readonly WorkforceTab[] = ['structure', 'employees', 'positions', 't
             @case ('teams') { <app-wf-teams /> }
           }
         </div>
-        <ui-panel heading="AI agents" subheading="Demo data">
+        <ui-panel heading="AI agents" subheading="Managed separately from employees">
           <p class="text-tertiary">
-            AI employees are not managed here yet: they arrive with Phase B3. Teams currently contain human employees only;
-            agents will join teams through a dedicated relationship.
+            AI agents are not employees: they are configured in <a routerLink="/agents">AI agents</a> and join teams through
+            a dedicated relationship, listed apart from human members in the Teams tab.
           </p>
         </ui-panel>
       }

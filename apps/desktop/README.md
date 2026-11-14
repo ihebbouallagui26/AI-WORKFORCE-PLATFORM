@@ -2,7 +2,7 @@
 
 Desktop control center for a hybrid human + AI workforce, built with **Angular 22** (standalone components, signals, zoneless) and **Electron 45**.
 
-Since Sprint B1 the desktop signs in with Keycloak (Authorization Code + PKCE in the system browser, driven by the Electron main process) and uses the Core API for the **user profile, organizations, members, roles and invitations** and, since Sprint B2, for the **workforce: employees, departments (hierarchy), positions and teams** (Organization section). Agents, projects, communication and supervision still run on **demo data held in memory** (labelled “Demo data”): nothing of these is sent to a server and no AI agent executes anything. See [`docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md`](../../docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md).
+Since Sprint B1 the desktop signs in with Keycloak (Authorization Code + PKCE in the system browser, driven by the Electron main process) and uses the Core API for the **user profile, organizations, members, roles and invitations** and, since Sprint B2, for the **workforce: employees, departments (hierarchy), positions and teams** (Organization section). Since Sprint B3, for **AI agents, model-provider connections, skills, tool permissions and team assignments** (AI agents section, `api` mode). Projects, communication and supervision still run on **demo data held in memory** (labelled “Demo data”), as does the whole agents demo of the `mock` build. No AI agent executes anything. See [`docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md`](../../docs/architecture/DESKTOP_AUTHENTICATION_ARCHITECTURE.md).
 
 ## Layout
 
@@ -116,7 +116,9 @@ An `Agent` has an `identity` (name, department, role, responsibilities, skills) 
 
 ## Known limitations
 
-- Agents, projects, communication, supervision and departments are demo data: changes last for the current session only.
+- In `api` mode, AI agents, providers, skills, tool permissions and team assignments are real (Core API, Phase B3). In the `mock` build, and for projects, communication and supervision, the data is demo data: changes last for the current session only.
+- Agents are configured, not executed: `ACTIVE` only means eligible for a future execution phase. No tool, shell or MCP server runs.
+- A provider API key is typed once in a write-only field, sent through the main process and cleared at once. It transits renderer memory and IPC before reaching the main process, and is never stored, displayed or returned. Real provider connectivity is not covered by automated tests (local fake servers only).
 - The job title in the profile is local (the Core API stores only the display name).
 - Agents do not execute tasks or reply, and approvals are not delivered to agents.
 - Voice messages, calls and attachments are shown as disabled “coming soon” controls.
