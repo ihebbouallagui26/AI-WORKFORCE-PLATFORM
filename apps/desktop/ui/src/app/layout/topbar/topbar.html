@@ -25,7 +25,11 @@
       <span class="topbar__context-dot" aria-hidden="true"></span>
       <span class="topbar__context-name">{{ organization.name }}</span>
       <span class="topbar__context-mode">{{ organization.deployment }}</span>
-      <span class="topbar__mock" title="All data in this build is mock data stored locally">Mock data</span>
+      @if (session.required) {
+        <span class="topbar__mock" title="Organizations, members, roles and invitations are real. Agents, projects, communication and activity are still demo data.">Demo data</span>
+      } @else {
+        <span class="topbar__mock" title="All data in this build is mock data stored locally">Mock data</span>
+      }
     </a>
   }
 
@@ -100,5 +104,11 @@
     <a class="menu-item" routerLink="/settings/general"><ui-icon name="settings" [size]="15" /> Settings</a>
     <a class="menu-item" routerLink="/help" fragment="shortcuts"><ui-icon name="keyboard" [size]="15" /> Keyboard shortcuts</a>
     <a class="menu-item" routerLink="/help"><ui-icon name="support" [size]="15" /> Help &amp; support</a>
+    @if (session.required) {
+      <div class="menu-separator"></div>
+      <a class="menu-item" routerLink="/organizations/new"><ui-icon name="plus" [size]="15" /> Create organization</a>
+      <a class="menu-item" routerLink="/invitations/accept"><ui-icon name="mail" [size]="15" /> Accept an invitation</a>
+      <button type="button" class="menu-item" (click)="signOut()"><ui-icon name="log-out" [size]="15" /> Sign out</button>
+    }
   </ui-dropdown>
 </div>

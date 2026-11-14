@@ -1,7 +1,7 @@
 import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { environment } from '../environments/environment';
+import { environment } from '../environments/environment.mock';
 import { provideDataLayer } from '../app/core/data/provide-data-layer';
 import { MOCK_LATENCY_MS } from '../app/core/data/mock/mock-database';
 

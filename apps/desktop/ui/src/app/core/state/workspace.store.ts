@@ -47,6 +47,12 @@ export class WorkspaceStore {
     return membership ? { kind: 'human', id: membership.employeeId } : null;
   });
 
+  /** Reloads the user and organization list (after creating or joining an organization). */
+  reload(): void {
+    this.organizationList.reload();
+    this.userResource.reload();
+  }
+
   switchOrganization(organizationId: Id): void {
     this.selectedOrganizationId.set(organizationId);
     this.preferences.set('lastOrganizationId', organizationId);

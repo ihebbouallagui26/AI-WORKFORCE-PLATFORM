@@ -2,6 +2,8 @@
 
 **Status:** Sprint B0 — 2026-11-12. Everything marked *(B1)* is designed but **not implemented**.
 
+> **Sprint B1 update.** Authentication, authorization, multi-tenancy and desktop authentication are implemented. The authoritative descriptions are now [IDENTITY_ARCHITECTURE.md](IDENTITY_ARCHITECTURE.md), [MULTI_TENANCY_ARCHITECTURE.md](MULTI_TENANCY_ARCHITECTURE.md) and [DESKTOP_AUTHENTICATION_ARCHITECTURE.md](DESKTOP_AUTHENTICATION_ARCHITECTURE.md); sections marked *(B1)* below record the plan made in B0.
+
 ## 1. Current state (Sprint B0, implemented and tested)
 
 | Control | Implementation | Test |

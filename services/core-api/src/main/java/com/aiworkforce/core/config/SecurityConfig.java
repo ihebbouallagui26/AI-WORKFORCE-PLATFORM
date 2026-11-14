@@ -15,6 +15,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
@@ -29,11 +30,13 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
  * Central HTTP security policy: <strong>deny by default</strong>.
  *
  * <ul>
- *   <li>Stateless: no HTTP session, no cookies. Authentication will be a bearer token in the
- *       {@code Authorization} header (Sprint B1), which is why CSRF protection is disabled:
- *       browsers never attach that header automatically.</li>
- *   <li>Public endpoints are listed explicitly; everything else requires authentication.
- *       No authentication mechanism exists yet, so every business endpoint answers 401.</li>
+ *   <li>Stateless: no HTTP session, no cookies. Authentication is an OAuth 2.0 bearer access
+ *       token (JWT issued by Keycloak) in the {@code Authorization} header, which is why CSRF
+ *       protection is disabled: browsers never attach that header automatically.</li>
+ *   <li>Tokens are validated by {@code AccessTokenDecoderConfig} (signature, issuer, audience,
+ *       expiry, not-before, token type). Token claims grant <em>no</em> authority: permissions
+ *       are loaded from PostgreSQL per organization by {@code TenantAccessService}.</li>
+ *   <li>Public endpoints are listed explicitly; everything else requires authentication.</li>
  *   <li>401/403 responses are produced by {@code GlobalExceptionHandler}, so they have the same
  *       RFC 9457 shape as every other error.</li>
  * </ul>
@@ -84,6 +87,12 @@ public class SecurityConfig {
                     }
                     authorize.anyRequest().authenticated();
                 })
+                .oauth2ResourceServer(resourceServer -> resourceServer
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(accessTokenAuthenticationConverter()))
+                        .authenticationEntryPoint((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex))
+                        .accessDeniedHandler((request, response, ex) ->
+                                exceptionResolver.resolveException(request, response, null, ex)))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint((request, response, ex) ->
                                 exceptionResolver.resolveException(request, response, null, ex))
@@ -91,6 +100,13 @@ public class SecurityConfig {
                                 exceptionResolver.resolveException(request, response, null, ex)));
 
         return http.build();
+    }
+
+    /** Authorities are never derived from token claims (roles live in the database, per organization). */
+    private static JwtAuthenticationConverter accessTokenAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> List.of());
+        return converter;
     }
 
     private static RequestMatcher matchers(String... patterns) {

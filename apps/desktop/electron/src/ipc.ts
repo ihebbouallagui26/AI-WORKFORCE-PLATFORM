@@ -1,6 +1,23 @@
 import { app, ipcMain, IpcMainInvokeEvent, shell } from 'electron';
 import { isAllowedExternalUrl, isAppUrl } from './policy';
-import type { DesktopAppInfo, IpcChannel, OpenExternalResult } from './shared/desktop-api';
+import type { ApiProxy } from './auth/api-proxy';
+import type { AuthSession } from './auth/auth-session';
+import type {
+  ApiResponse,
+  AuthSessionState,
+  DesktopAppInfo,
+  IpcChannel,
+  LoginResult,
+  OpenExternalResult,
+} from './shared/desktop-api';
+
+/** Services backing the authentication and API channels (absent when misconfigured). */
+export interface AuthServices {
+  readonly session: AuthSession;
+  readonly api: ApiProxy;
+}
+
+const UNAVAILABLE_SESSION: AuthSessionState = { status: 'signed-out', user: null, storage: 'session-only', reason: 'error' };
 
 /**
  * Rejects IPC calls that do not originate from the main frame of an application page.
@@ -29,7 +46,7 @@ function handle<Args extends unknown[], Result>(
 }
 
 /** Registers the complete, explicit set of desktop capabilities. */
-export function registerIpcHandlers(devServer: URL | null): void {
+export function registerIpcHandlers(devServer: URL | null, auth: AuthServices | null): void {
   handle<[], DesktopAppInfo>('app:get-info', devServer, 0, () => ({
     name: app.getName(),
     version: app.getVersion(),
@@ -54,4 +71,16 @@ export function registerIpcHandlers(devServer: URL | null): void {
       return { ok: false, reason: 'failed' };
     }
   });
+
+  handle<[], AuthSessionState>('auth:get-session', devServer, 0, () => auth?.session.state() ?? UNAVAILABLE_SESSION);
+
+  handle<[], LoginResult>('auth:login', devServer, 0, () =>
+    auth ? auth.session.login() : { ok: false, reason: 'unavailable' });
+
+  handle<[], void>('auth:cancel-login', devServer, 0, () => auth?.session.cancelLogin());
+
+  handle<[], void>('auth:logout', devServer, 0, () => auth?.session.logout());
+
+  handle<[unknown], ApiResponse>('api:request', devServer, 1, (request) =>
+    auth ? auth.api.request(request) : { status: 0, body: null, error: 'unauthenticated' });
 }

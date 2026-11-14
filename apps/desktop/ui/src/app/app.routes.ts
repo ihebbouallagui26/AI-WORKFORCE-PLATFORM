@@ -1,13 +1,25 @@
+import { inject } from '@angular/core';
 import { Routes } from '@angular/router';
+import { authGuard, signedOutGuard } from './core/auth/auth.guard';
+import { AUTH_REQUIRED } from './core/auth/session.service';
 import { MainLayout } from './layout/main-layout/main-layout';
 
 /**
  * Every feature is lazy-loaded. `data.title` feeds the topbar breadcrumb and the window title.
+ * The application shell requires a session (in `mock` mode the guard always lets through).
  */
 export const routes: Routes = [
   {
+    path: 'login',
+    title: 'Sign in',
+    canActivate: [signedOutGuard],
+    loadComponent: () => import('./features/auth/login-page').then((m) => m.LoginPage),
+  },
+  {
     path: '',
     component: MainLayout,
+    canActivate: [authGuard],
+    canActivateChild: [authGuard],
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
       {
@@ -26,8 +38,12 @@ export const routes: Routes = [
         path: 'organization',
         title: 'Organization',
         data: { title: 'Organization' },
+        // With the Core API (api mode) the organization section is the real workforce management;
+        // the in-memory demo page is kept for the mock build and the unit tests.
         loadComponent: () =>
-          import('./features/organization/organization-page').then((m) => m.OrganizationPage),
+          inject(AUTH_REQUIRED)
+            ? import('./features/workforce/workforce-page').then((m) => m.WorkforcePage)
+            : import('./features/organization/organization-page').then((m) => m.OrganizationPage),
       },
       {
         path: 'projects',
@@ -61,6 +77,20 @@ export const routes: Routes = [
         title: 'Profile',
         data: { title: 'Profile' },
         loadComponent: () => import('./features/profile/profile-page').then((m) => m.ProfilePage),
+      },
+      {
+        path: 'organizations/new',
+        title: 'Create an organization',
+        data: { title: 'New organization' },
+        loadComponent: () =>
+          import('./features/organizations/create-organization-page').then((m) => m.CreateOrganizationPage),
+      },
+      {
+        path: 'invitations/accept',
+        title: 'Accept an invitation',
+        data: { title: 'Accept an invitation' },
+        loadComponent: () =>
+          import('./features/invitations/accept-invitation-page').then((m) => m.AcceptInvitationPage),
       },
       {
         path: 'help',

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu } from 'electron';
 import { APP_ORIGIN, preloadPath, rendererRoot, resolveDevServerUrl } from './config';
-import { registerIpcHandlers } from './ipc';
+import { createAuthServices } from './auth/setup';
+import { registerIpcHandlers, type AuthServices } from './ipc';
 import { registerAppScheme, serveRenderer } from './renderer-protocol';
 import { hardenSession, refuseDebuggingSwitchesWhenPackaged, restrictNavigation } from './security';
 
@@ -20,6 +21,7 @@ if (!isPrimaryInstance) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let auth: AuthServices | null = null;
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -89,7 +91,15 @@ app.whenReady().then(() => {
   }
   hardenSession(devServer);
   serveRenderer(rendererRoot());
-  registerIpcHandlers(devServer);
+  auth = createAuthServices();
+  registerIpcHandlers(devServer, auth);
+  // Session state (never tokens) is pushed to the application window.
+  auth?.session.onChange((state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('auth:session-changed', state);
+    }
+  });
+  void auth?.session.restore();
   buildMenu();
   mainWindow = createMainWindow();
   mainWindow.on('closed', () => (mainWindow = null));

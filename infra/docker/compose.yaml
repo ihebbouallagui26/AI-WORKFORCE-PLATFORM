@@ -1,9 +1,12 @@
 # Local development and integration stack.
 #
-#   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d postgres
+#   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d
+#       → PostgreSQL, role bootstrap, Keycloak (http://localhost:8082), Mailpit (http://localhost:8025)
 #   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile app up -d --build
+#       → same stack + the Core API container
 #
-# Credentials come from infra/docker/.env (never committed, see .env.example).
+# Credentials come from infra/docker/.env (never committed, see .env.example and
+# infra/docker/scripts/ensure-env.sh).
 name: ai-workforce
 
 services:
@@ -13,6 +16,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      # Bootstrap superuser: only used by db-init. Neither the Core API nor Keycloak use it.
       POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME is required}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       # Store timestamps and logs in UTC.
@@ -31,6 +35,72 @@ services:
       retries: 12
       start_period: 10s
 
+  db-init:
+    # One-shot, idempotent privilege separation (migration / runtime / Keycloak roles).
+    # Runs on every `up`, works on existing volumes and never drops data.
+    image: pgvector/pgvector:0.8.7-pg18
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["bash", "/scripts/init-roles.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${DB_USERNAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      APP_DB_NAME: ${DB_NAME}
+      DB_MIGRATION_USERNAME: ${DB_MIGRATION_USERNAME:?DB_MIGRATION_USERNAME is required}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?DB_MIGRATION_PASSWORD is required}
+      DB_APP_USERNAME: ${DB_APP_USERNAME:?DB_APP_USERNAME is required}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?DB_APP_PASSWORD is required}
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:-keycloak}
+      KEYCLOAK_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+    volumes:
+      - ./postgres/init-roles.sh:/scripts/init-roles.sh:ro
+
+  keycloak:
+    # Pinned release, see docs/adr/ADR-0008-keycloak-identity-provider.md.
+    image: quay.io/keycloak/keycloak:26.8.2
+    restart: unless-stopped
+    # Development mode (HTTP, no TLS). Production uses `start` behind TLS, see infra/keycloak/README.md.
+    command: ["start-dev", "--import-realm"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USERNAME}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?KEYCLOAK_ADMIN_USERNAME is required}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD is required}
+      # Public URL used in tokens (iss) and in the browser. Back-channel calls from other
+      # containers (JWKS) may use http://keycloak:8080.
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8082}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8082}:8080"
+    volumes:
+      # Imported only if the realm does not exist yet (realm changes are then made in Keycloak).
+      - ../keycloak/realm:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image has no curl: query the management interface (port 9000) with bash /dev/tcp.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  mailpit:
+    # Local SMTP sink for invitation and verification e-mails: http://localhost:8025
+    image: axllent/mailpit:v1.33.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+      - "127.0.0.1:${MAIL_PORT:-1025}:1025"
+
   core-api:
     # Opt-in: only started with `--profile app` (developers usually run the API from Maven).
     profiles: ["app"]
@@ -39,7 +109,9 @@ services:
     image: ai-workforce/core-api:local
     restart: unless-stopped
     depends_on:
-      postgres:
+      db-init:
+        condition: service_completed_successfully
+      keycloak:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
@@ -47,8 +119,16 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: ${DB_NAME}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_MIGRATION_USERNAME: ${DB_MIGRATION_USERNAME}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD}
+      DB_APP_USERNAME: ${DB_APP_USERNAME}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8082/realms/ai-workforce}
+      # Inside the compose network the JWKS is fetched from the Keycloak container directly.
+      OIDC_JWK_SET_URI: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/certs
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-ai-workforce-api}
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"

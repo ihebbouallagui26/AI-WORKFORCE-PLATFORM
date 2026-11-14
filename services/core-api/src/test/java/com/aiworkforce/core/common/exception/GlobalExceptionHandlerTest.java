@@ -17,6 +17,8 @@ import com.aiworkforce.core.config.CorsConfig;
 import com.aiworkforce.core.config.SecurityConfig;
 import com.aiworkforce.core.config.TimeConfig;
 import com.aiworkforce.core.support.TestSupportController;
+import com.aiworkforce.core.auth.AccessTokenDecoderConfig;
+import com.aiworkforce.core.identity.UserProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -24,14 +26,16 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Error contract (RFC 9457) for authenticated callers. Authentication is simulated with
- * {@link WithMockUser} in tests only: the application itself has no authentication yet.
+ * {@link WithMockUser}: these tests target the error contract, not token validation
+ * (covered by {@code AccessTokenIntegrationTest}).
  */
 @WebMvcTest(controllers = TestSupportController.class)
-@Import({SecurityConfig.class, CorsConfig.class, TimeConfig.class})
+@Import({SecurityConfig.class, CorsConfig.class, TimeConfig.class, AccessTokenDecoderConfig.class})
 @ActiveProfiles({"test", "test-support"})
 @WithMockUser
 class GlobalExceptionHandlerTest {
@@ -40,6 +44,10 @@ class GlobalExceptionHandlerTest {
 
     @Autowired
     private MockMvc mvc;
+
+    /** Required by the identity argument resolver; not used by these endpoints. */
+    @MockitoBean
+    private UserProvisioningService provisioning;
 
     @Test
     void acceptsAValidPayload() throws Exception {

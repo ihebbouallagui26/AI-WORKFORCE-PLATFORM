@@ -1,7 +1,15 @@
-# Automated tests. The datasource is provided by Testcontainers (@ServiceConnection).
+# Automated tests. The datasource is provided by Testcontainers (see TestcontainersConfiguration:
+# separate migration and runtime roles, as in production).
 app:
   cors:
     allowed-origins: http://localhost:4200
+  security:
+    oidc:
+      # Overridden by TestIdentityProvider / KeycloakIntegrationTest. These defaults are never
+      # reachable, so a token can only be accepted by tests that publish a real key set.
+      issuer: http://127.0.0.1:9/realms/ai-workforce-test
+      jwk-set-uri: http://127.0.0.1:9/realms/ai-workforce-test/protocol/openid-connect/certs
+      audience: ai-workforce-api
 
 logging:
   level:

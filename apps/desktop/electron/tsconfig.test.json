@@ -4,5 +4,15 @@
     "rootDir": ".",
     "outDir": ".test-dist"
   },
-  "include": ["src/policy.ts", "test/**/*.ts"]
+  "include": [
+    "src/policy.ts",
+    "src/auth/auth-policy.ts",
+    "src/auth/loopback-server.ts",
+    "src/auth/token-store.ts",
+    "src/auth/auth-session.ts",
+    "src/auth/api-proxy.ts",
+    "src/auth/openid-provider.ts",
+    "src/shared/desktop-api.ts",
+    "test/**/*.ts"
+  ]
 }

@@ -1,0 +1,4 @@
+# Shell scripts run inside Linux containers and must keep LF line endings on every OS.
+*.sh text eol=lf
+mvnw text eol=lf
+contracts/openapi/*.json text eol=lf

@@ -36,7 +36,9 @@
               "src/styles.scss"
             ],
             "stylePreprocessorOptions": {
-              "includePaths": ["src/styles"]
+              "includePaths": [
+                "src/styles"
+              ]
             }
           },
           "configurations": {
@@ -73,6 +75,17 @@
                   "with": "src/environments/environment.development.ts"
                 }
               ]
+            },
+            "mock": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.mock.ts"
+                }
+              ]
             }
           },
           "defaultConfiguration": "production"
@@ -85,6 +98,9 @@
             },
             "development": {
               "buildTarget": "ui:build:development"
+            },
+            "mock": {
+              "buildTarget": "ui:build:mock"
             }
           },
           "defaultConfiguration": "development"

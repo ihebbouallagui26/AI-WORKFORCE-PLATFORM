@@ -2,15 +2,11 @@
 
 Core backend of the AI Workforce Platform: a **Spring Boot modular monolith** on PostgreSQL.
 
-Sprint B0 delivers the foundation only:
-- configuration profiles, PostgreSQL connection and Flyway migrations;
-- a deny-by-default security policy and RFC 9457 error responses;
-- health checks, OpenAPI documentation, request correlation;
-- unit, web, integration (Testcontainers) and architecture tests.
+- **Sprint B0** — foundation: configuration profiles, PostgreSQL + Flyway, deny-by-default security, RFC 9457 errors, health, OpenAPI, request correlation, tests.
+- **Sprint B2** — workforce management: employees (professional profiles, optionally linked to a platform membership), hierarchical departments, positions (job titles, never permissions) and teams with member history, on top of the B1 tenant model.
+- **Sprint B1** — authentication (OAuth2 resource server, Keycloak access tokens), user provisioning by `(issuer, subject)`, organizations, memberships, RBAC (built-in and custom roles, anti-escalation), strict multi-tenant isolation, invitations by e-mail, audit trail, separate database roles.
 
-There are **no business endpoints and no authentication yet**: every endpoint except health returns `401`. Authentication, authorization and multi-tenancy are Sprint B1.
-
-Architecture: [`docs/architecture/CORE_BACKEND_ARCHITECTURE.md`](../../docs/architecture/CORE_BACKEND_ARCHITECTURE.md) · Security: [`docs/architecture/SECURITY_ARCHITECTURE.md`](../../docs/architecture/SECURITY_ARCHITECTURE.md) · Decisions: [`docs/adr`](../../docs/adr)
+Workforce: [`WORKFORCE_MANAGEMENT_ARCHITECTURE.md`](../../docs/architecture/WORKFORCE_MANAGEMENT_ARCHITECTURE.md) · Data model: [`WORKFORCE_DATA_MODEL.md`](../../docs/database/WORKFORCE_DATA_MODEL.md) · Identity: [`IDENTITY_ARCHITECTURE.md`](../../docs/architecture/IDENTITY_ARCHITECTURE.md) · Multi-tenancy: [`MULTI_TENANCY_ARCHITECTURE.md`](../../docs/architecture/MULTI_TENANCY_ARCHITECTURE.md) · Schema: [`IDENTITY_AND_ORGANIZATION_SCHEMA.md`](../../docs/database/IDENTITY_AND_ORGANIZATION_SCHEMA.md) · Architecture: [`docs/architecture/CORE_BACKEND_ARCHITECTURE.md`](../../docs/architecture/CORE_BACKEND_ARCHITECTURE.md) · Security: [`docs/architecture/SECURITY_ARCHITECTURE.md`](../../docs/architecture/SECURITY_ARCHITECTURE.md) · Decisions: [`docs/adr`](../../docs/adr)
 
 ## Technology stack
 
@@ -39,11 +35,12 @@ Version choices are recorded in [ADR-0002](../../docs/adr/ADR-0002-spring-boot-4
 ## Local setup
 
 ```bash
-# 1. Environment (once). Set DB_PASSWORD to a long random value.
-cp infra/docker/.env.example infra/docker/.env
+# 1. Environment (from the repository root). Adds missing keys with random passwords;
+#    never changes existing values.
+bash infra/docker/scripts/ensure-env.sh
 
-# 2. Start PostgreSQL (from the repository root)
-docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d postgres
+# 2. Start PostgreSQL (+ role setup), Keycloak and Mailpit
+docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d --wait
 
 # 3. Run the API with the dev profile (from services/core-api)
 cd services/core-api
@@ -61,7 +58,14 @@ The `dev` profile reads `infra/docker/.env` (and an optional `services/core-api/
 | `SPRING_PROFILES_ACTIVE` | no | none (production-safe base) | `dev`, `test` or `prod`. `spring-boot:run` uses `dev`. |
 | `SERVER_PORT` | no | `8080` | HTTP port |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | no | `localhost` / `5432` / `ai_workforce` | PostgreSQL location |
-| `DB_USERNAME` / `DB_PASSWORD` | **yes** | none | Database credentials. The app does not start without them. |
+| `DB_USERNAME` / `DB_PASSWORD` | compose only | none | Bootstrap superuser, used only by `db-init` to create roles and extensions — never by the API |
+| `DB_MIGRATION_USERNAME` / `DB_MIGRATION_PASSWORD` | **yes** | none | Flyway role (owns the schema, DDL) |
+| `DB_APP_USERNAME` / `DB_APP_PASSWORD` | **yes** | none | Runtime role (data access only, no DDL) |
+| `OIDC_ISSUER` | **yes** | none | Exact issuer of accepted tokens, e.g. `http://localhost:8082/realms/ai-workforce` |
+| `OIDC_JWK_SET_URI` | **yes** | none | JWKS URL used to verify signatures |
+| `OIDC_AUDIENCE` | **yes** | none | Required audience (`ai-workforce-api`) |
+| `MAIL_HOST` / `MAIL_PORT` | for invitations | none / `25` | SMTP server (Mailpit locally: `localhost` / `1025`). Without it, invitations answer 503 |
+| `INVITATION_MAIL_FROM` | no | `no-reply@aiworkforce.local` | Sender of invitation e-mails |
 | `APP_CORS_ALLOWED_ORIGINS` | **yes** outside `dev` | `http://localhost:4200` in `dev` only | Comma-separated exact origins. Wildcards are rejected at startup. |
 
 Secrets are never committed: `.env` files are ignored by Git, and only `*.env.example` files with placeholders are versioned.
@@ -69,14 +73,15 @@ Secrets are never committed: `.env` files are ignored by Git, and only `*.env.ex
 ## Database and migrations
 
 - The schema is owned by **Flyway**: `src/main/resources/db/migration/V<n>__<description>.sql`. Migrations run automatically at startup, before Hibernate validates the schema (`ddl-auto=validate`).
-- `V1__enable_extensions.sql` enables `pgvector`. No business tables exist yet.
+- `V1__enable_extensions.sql` enables `pgvector`; `V2__identity_and_organizations.sql` adds identity, organizations, RBAC, invitations and audit; `V3__workforce_management.sql` adds employee profiles, departments, positions, teams and ten permissions (granted to the built-in roles of existing organizations). `afterMigrate.sql` re-applies the runtime role's grants.
+- Flyway runs as `DB_MIGRATION_USERNAME`; the application pool uses `DB_APP_USERNAME` (see [ADR-0011](../../docs/adr/ADR-0011-database-privilege-separation.md)).
 - Applied migrations are immutable. A fix is a new migration, and `flyway clean` is disabled.
 - Conventions: [`docs/database/DATABASE_CONVENTIONS.md`](../../docs/database/DATABASE_CONVENTIONS.md).
 
 ```bash
 # Inspect the database
 docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec postgres \
-  psql -U app_user -d ai_workforce -c "select version, description, success from flyway_schema_history"
+  psql -U "$DB_USERNAME" -d ai_workforce -c "select version, description, success from flyway_schema_history"
 ```
 
 ## API
@@ -87,7 +92,15 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 | `GET /actuator/health` (`/liveness`, `/readiness`) | public | Operational probes. Details are shown only in `dev`. |
 | `GET /actuator/info` | public | Build information |
 | `/v3/api-docs`, `/swagger-ui.html` | public in `dev` only | OpenAPI document and Swagger UI |
-| everything else | authenticated | `401` until Sprint B1 |
+| `GET/PATCH /api/v1/me` | bearer token | Caller profile |
+| `/api/v1/organizations[/{organizationId}]` | bearer token + membership | List/create/get/update organizations, audit events |
+| `/api/v1/organizations/{id}/members`, `/roles`, `/invitations` | bearer token + membership + permission | Members, roles and invitations |
+| `GET /api/v1/permissions`, `POST /api/v1/invitations/accept` | bearer token | Permission catalog, invitation acceptance |
+| `/api/v1/organizations/{id}/employees` (+ `/{employeeId}`, `/department`, `/position`, `/manager`, `/membership`, `/status`, `/teams`) | bearer token + membership + `employee.*` | Employee profiles: search, filters, assignments, lifecycle |
+| `/api/v1/organizations/{id}/departments` (+ `/tree`, `/{id}`, `/parent`, `/head`, `/archive`, `/restore`) | bearer token + membership + `department.*` | Department hierarchy |
+| `/api/v1/organizations/{id}/positions` (+ `/{id}`, `/department`, `/archive`, `/restore`) | bearer token + membership + `position.*` | Position catalog |
+| `/api/v1/organizations/{id}/teams` (+ `/{id}`, `/department`, `/leader`, `/members`, `/archive`, `/restore`) | bearer token + membership + `team.*` | Teams and their members |
+| everything else | — | `401` without a valid token |
 
 - **Swagger UI (dev):** `http://localhost:8080/swagger-ui.html`. The OpenAPI JSON is at `/v3/api-docs`.
 - **Published contract:** [`contracts/openapi/core-api.v1.json`](../../contracts/openapi/core-api.v1.json). It is regenerated by the test suite into `target/openapi/core-api.v1.json`.
@@ -97,12 +110,12 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env exec po
 ## Tests
 
 ```bash
-./mvnw clean test       # 63 tests: unit, web/security, architecture, PostgreSQL integration
+./mvnw clean verify     # 137+ tests: unit, web/security, architecture, integration (PostgreSQL, Mailpit, Keycloak)
 ./mvnw clean package    # tests + executable jar in target/
 ./mvnw dependency:analyze
 ```
 
-The integration tests start `pgvector/pgvector:0.8.7-pg18` with Testcontainers. Without Docker they are **skipped**, not failed, and Maven reports them as skipped.
+The integration tests start `pgvector/pgvector:0.8.7-pg18` (with the production role script), `axllent/mailpit:v1.33.1` and `quay.io/keycloak/keycloak:26.8.2` (with the versioned realm) with Testcontainers. Access tokens for most tests are signed by an in-test key published as a JWKS and validated by the production decoder; `KeycloakIntegrationTest` runs a real PKCE login. Without Docker they are **skipped**, not failed, and Maven reports them as skipped.
 
 ## Docker
 
@@ -126,10 +139,19 @@ Migrations run inside the application at startup, never from an entrypoint scrip
 com.aiworkforce.core
 ├── CoreApiApplication
 ├── config/        AppProperties, SecurityConfig, CorsConfig, OpenApiConfig, TimeConfig
-├── common/
-│   ├── exception/ GlobalExceptionHandler, ProblemType, ResourceNotFoundException
-│   └── logging/   RequestIdFilter
-└── health/        HealthController, ApplicationHealthService, HealthResponse
+├── common/        exception/, logging/, id/ (UUID v7), web/ (pagination), persistence/ (@TenantScoped)
+├── health/        HealthController, ApplicationHealthService, HealthResponse
+├── auth/          JWT decoder and access-token validators
+├── identity/      users, external identities (iss, sub), JIT provisioning, /me
+├── audit/         append-only audit events
+├── access/        memberships, roles, permissions, tenant check, anti-escalation, member/role endpoints
+├── organization/  organizations, audit listing
+├── invitation/    invitations (hashed tokens, e-mail delivery, acceptance)
+├── workforce/     shared kernel of the workforce modules: statuses and ports (EmployeeDirectory, EmployeeLifecycleParticipant)
+├── department/    hierarchical departments (cycle-free, archive instead of delete)
+├── position/      job titles (never permissions)
+├── employee/      employee profiles (optional membership link, reporting lines, lifecycle)
+└── team/          teams and member history
 ```
 
-Future business modules (`organization`, `agent`, `project`…) are sibling packages, following the rules in the architecture document and enforced by `ArchitectureTest`.
+Future business modules (`agent`, `project`…) are sibling packages, following the rules in the architecture document and enforced by `ArchitectureTest`.
