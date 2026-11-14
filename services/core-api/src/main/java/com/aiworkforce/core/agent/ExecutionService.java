@@ -67,14 +67,34 @@ public class ExecutionService {
         this.clock = clock;
     }
 
+    /** The open-execution limit of the organization is reached: a launch may be retried later, it is not invalid. */
+    static final class CapacityExceededException extends ConflictException {
+        CapacityExceededException() {
+            super("Too many executions are in progress. Try again when one has finished.");
+        }
+    }
+
     @Transactional
     public ExecutionView start(UUID organizationId, UUID agentId, AuthenticatedUser user, String task) {
         access.require(organizationId, user, Permission.AGENT_EXECUTE);
-        String cleaned = task == null ? "" : task.strip();
-        if (cleaned.isEmpty()) {
-            throw new ConflictException("An instruction is required.");
-        }
+        return ExecutionView.of(launch(organizationId, agentId, user.userId(), task));
+    }
+
+    /**
+     * Whether the agent could run right now (ACTIVE, valid primary provider enabled for execution), without creating
+     * anything. Throws the same refusals as a launch. Used to validate workflow participants.
+     */
+    @Transactional(readOnly = true, noRollbackFor = {ConflictException.class, ResourceNotFoundException.class})
+    void ensureRunnable(UUID organizationId, UUID agentId) {
         Agent agent = support.load(organizationId, agentId);
+        primaryConnection(organizationId, agent);
+    }
+
+    private record Primary(AgentParts.ProviderBinding binding, ProviderDirectory.ConnectionRef connection) {
+    }
+
+    private Primary primaryConnection(UUID organizationId, Agent agent) {
+        UUID agentId = agent.getId();
         if (agent.getStatus() != AgentStatus.ACTIVE) {
             throw new ConflictException("Only an active agent can be executed.");
         }
@@ -89,23 +109,40 @@ public class ExecutionService {
         if (!ENABLED_PROVIDERS.contains(connection.providerType())) {
             throw new ConflictException("This provider is not enabled for agent execution yet.");
         }
+        return new Primary(primary, connection);
+    }
 
+    /**
+     * Creates and hands over one execution for {@code requestedBy}. The CALLER is responsible for having authorized that
+     * person (the user chain checks {@code agent.execute}; the workflow scheduler checks it again before every step).
+     * Everything else (agent ACTIVE, provider, concurrency limit) is validated here, in the same order as before.
+     */
+    @Transactional(noRollbackFor = {ConflictException.class, ResourceNotFoundException.class})
+    AgentExecution launch(UUID organizationId, UUID agentId, UUID requestedBy, String task) {
+        String cleaned = task == null ? "" : task.strip();
+        if (cleaned.isEmpty()) {
+            throw new ConflictException("An instruction is required.");
+        }
+        Agent agent = support.load(organizationId, agentId);
+        Primary resolved = primaryConnection(organizationId, agent);
+        AgentParts.ProviderBinding primary = resolved.binding();
+        ProviderDirectory.ConnectionRef connection = resolved.connection();
         // Serialize the limit check per organization so concurrent launches cannot exceed it.
         organizationLock.acquire(organizationId);
         if (executions.countOpenByOrganization(organizationId) >= properties.maxConcurrentPerOrganization()) {
-            throw new ConflictException("Too many executions are in progress. Try again when one has finished.");
+            throw new CapacityExceededException();
         }
 
         Instant now = Instant.now(clock);
-        AgentExecution execution = new AgentExecution(UUID.randomUUID(), organizationId, agentId, user.userId(), cleaned,
+        AgentExecution execution = new AgentExecution(UUID.randomUUID(), organizationId, agentId, requestedBy, cleaned,
                 connection.providerType(), connection.id(), primary.getModelId(), MDC.get(RequestIdFilter.MDC_KEY), now);
         executions.save(execution);
         // The audit record never contains the instruction or any result.
-        audit.record(organizationId, user.userId(), "agent.execution.requested", "agent", agentId,
+        audit.record(organizationId, requestedBy, "agent.execution.requested", "agent", agentId,
                 AgentSupport.details("executionId", execution.getId(), "provider", connection.providerType().name(),
                         "model", primary.getModelId()));
         events.publishEvent(new ExecutionRequested(organizationId, execution.getId()));
-        return ExecutionView.of(execution);
+        return execution;
     }
 
     /**

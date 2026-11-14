@@ -39,6 +39,18 @@ interface ToolInvocationRepository extends JpaRepository<ToolInvocation, UUID> {
 
     long countByOrganizationIdAndExecutionId(UUID organizationId, UUID executionId);
 
+    /** True when a call of this execution ever started: an external effect may exist, so it is never retried. */
+    @Query("select count(i) > 0 from ToolInvocation i where i.organizationId = :organizationId "
+            + "and i.executionId = :executionId and i.startedAt is not null")
+    boolean existsStartedByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
+            @Param("executionId") UUID executionId);
+
+    /** True while a call of this execution is RUNNING (its outcome is not known yet). */
+    @Query("select count(i) > 0 from ToolInvocation i where i.organizationId = :organizationId "
+            + "and i.executionId = :executionId and i.status = com.aiworkforce.core.agent.InvocationStatus.RUNNING")
+    boolean existsRunningByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
+            @Param("executionId") UUID executionId);
+
     @Query("""
             select i from ToolInvocation i
             where i.organizationId = :organizationId and i.executionId = :executionId""")

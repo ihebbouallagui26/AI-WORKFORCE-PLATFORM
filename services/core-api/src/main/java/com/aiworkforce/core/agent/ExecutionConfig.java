@@ -10,7 +10,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 /** Configuration of agent executions: limits, the small hand-over pool and the stale-execution reaper schedule. */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
-@EnableConfigurationProperties(ExecutionProperties.class)
+@EnableConfigurationProperties({ExecutionProperties.class, WorkflowProperties.class})
 class ExecutionConfig {
 
     /**
