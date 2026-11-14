@@ -36,7 +36,9 @@ public record ExecutionContextView(
     /** One approved tool grant, with the MCP server and tool it maps to (if any). */
     @Schema(name = "ExecutionToolPermission")
     public record ToolPermission(String toolCode, ToolLevel level, boolean approvalRequired, String mcpServer,
-            String mcpTool, String name, String description, JsonNode inputSchema, ToolPolicy executionPolicy,
+            String mcpTool, String name, String description,
+            @Schema(type = "object", description = "JSON Schema of the tool arguments (validated again by the orchestrator)") JsonNode inputSchema,
+            ToolPolicy executionPolicy,
             ToolLevel requiredLevel, ToolRisk risk, int timeoutSeconds, int maxOutputBytes, int policyVersion) {
     }
 

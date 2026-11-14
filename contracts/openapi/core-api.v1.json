@@ -6784,85 +6784,6 @@
           }
         }
       },
-      "JsonNode" : {
-        "type" : "object",
-        "properties" : {
-          "array" : {
-            "type" : "boolean"
-          },
-          "empty" : {
-            "type" : "boolean"
-          },
-          "null" : {
-            "type" : "boolean"
-          },
-          "float" : {
-            "type" : "boolean"
-          },
-          "container" : {
-            "type" : "boolean"
-          },
-          "pojo" : {
-            "type" : "boolean"
-          },
-          "short" : {
-            "type" : "boolean"
-          },
-          "double" : {
-            "type" : "boolean"
-          },
-          "string" : {
-            "type" : "boolean"
-          },
-          "number" : {
-            "type" : "boolean"
-          },
-          "int" : {
-            "type" : "boolean"
-          },
-          "long" : {
-            "type" : "boolean"
-          },
-          "object" : {
-            "type" : "boolean"
-          },
-          "textual" : {
-            "type" : "boolean",
-            "deprecated" : true
-          },
-          "binary" : {
-            "type" : "boolean"
-          },
-          "boolean" : {
-            "type" : "boolean"
-          },
-          "nodeType" : {
-            "type" : "string",
-            "enum" : [ "ARRAY", "BINARY", "BOOLEAN", "MISSING", "NULL", "NUMBER", "OBJECT", "POJO", "STRING" ]
-          },
-          "bigDecimal" : {
-            "type" : "boolean"
-          },
-          "bigInteger" : {
-            "type" : "boolean"
-          },
-          "missingNode" : {
-            "type" : "boolean"
-          },
-          "integralNumber" : {
-            "type" : "boolean"
-          },
-          "valueNode" : {
-            "type" : "boolean"
-          },
-          "floatingPointNumber" : {
-            "type" : "boolean"
-          },
-          "embeddedValue" : {
-            "type" : "boolean"
-          }
-        }
-      },
       "ToolCallRequest" : {
         "type" : "object",
         "properties" : {
@@ -6877,7 +6798,8 @@
             "minLength" : 0
           },
           "arguments" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "type" : "string",
+            "description" : "The tool arguments as a JSON object"
           },
           "reason" : {
             "type" : "string",
@@ -6971,7 +6893,8 @@
             "type" : "string"
           },
           "arguments" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "type" : "string",
+            "description" : "The exact arguments to run, returned once"
           },
           "timeoutSeconds" : {
             "type" : "integer",
@@ -8253,7 +8176,8 @@
             "type" : "string"
           },
           "inputSchema" : {
-            "$ref" : "#/components/schemas/JsonNode"
+            "type" : "string",
+            "description" : "JSON Schema of the tool arguments (validated again by the orchestrator)"
           },
           "executionPolicy" : {
             "type" : "string",

@@ -38,7 +38,7 @@ public class InternalToolCallController {
     public record ToolCallRequest(
             @NotBlank @Size(max = 100) String toolCallId,
             @NotBlank @Size(max = 80) String toolCode,
-            JsonNode arguments,
+            @Schema(type = "object", description = "The tool arguments as a JSON object") JsonNode arguments,
             @Size(max = 1000) String reason) {
     }
 
@@ -49,7 +49,8 @@ public class InternalToolCallController {
 
     /** The arguments leave the Core API here only, to the service that runs the call. {@code toString} is redacted. */
     @Schema(name = "ToolCallStart", description = "Single use: the call starts exactly once. Served with no-store.")
-    public record BeginResponse(UUID invocationId, String toolCode, String mcpServer, String mcpTool, JsonNode arguments,
+    public record BeginResponse(UUID invocationId, String toolCode, String mcpServer, String mcpTool,
+            @Schema(type = "object", description = "The exact arguments to run, returned once") JsonNode arguments,
             int timeoutSeconds, int maxOutputBytes) {
 
         @Override
