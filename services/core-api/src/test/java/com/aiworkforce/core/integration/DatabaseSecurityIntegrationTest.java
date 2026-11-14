@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("6");
+            assertThat(result.targetSchemaVersion).isEqualTo("7");
         }
     }
 
@@ -395,7 +395,7 @@ class DatabaseSecurityIntegrationTest {
                 }
             }
 
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("6").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("6");
@@ -427,7 +427,7 @@ class DatabaseSecurityIntegrationTest {
                 assertThat(statement.executeQuery("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_agent_executions_status'")
                         .next()).isTrue();
             }
-            flyway.apply("latest").validate();
+            flyway.apply("6").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
@@ -437,6 +437,100 @@ class DatabaseSecurityIntegrationTest {
                         .isInstanceOf(java.sql.SQLException.class);
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE tool_approvals ADD COLUMN x int"))
                         .isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A C2 database (V1..V6, an organization with its built-in roles and an agent execution already recorded) upgrades to
+     * V7: the workflow permissions for OWNER and ADMIN only, the five workflow tables with their database-level guarantees
+     * (append-only journal, one live step per rank, one step per execution), agent_executions unchanged, and a runtime
+     * role that keeps DML but no DDL.
+     */
+    @Test
+    void upgradesAnExistingC2DatabaseAndAddsMultiAgentWorkflows() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("6").migrate();
+
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID owner = UUID.randomUUID();
+            UUID admin = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID custom = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'c2@example.test', true, 'C2', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing C2 organization', '" + user + "', now(), now())");
+                String roles = "INSERT INTO roles (id, organization_id, code, name, built_in, created_at, updated_at) VALUES ";
+                statement.execute(roles + "('" + owner + "', '" + organization + "', 'OWNER', 'Owner', true, now(), now()), ('"
+                        + admin + "', '" + organization + "', 'ADMIN', 'Administrator', true, now(), now()), ('"
+                        + member + "', '" + organization + "', 'MEMBER', 'Member', true, now(), now())");
+                statement.execute("INSERT INTO roles (id, organization_id, name, built_in, created_at, updated_at) VALUES ('"
+                        + custom + "', '" + organization + "', 'Runner', false, now(), now())");
+                for (UUID role : new UUID[] {owner, admin, member, custom}) {
+                    statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                            + role + "', '" + organization + "', 'agent.execute')");
+                }
+            }
+
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("7");
+
+            String workflows = "^workflow[.]";
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                assertThat(countPermissions(connection, owner, workflows)).isEqualTo(3);
+                assertThat(countPermissions(connection, admin, workflows)).isEqualTo(3);
+                assertThat(countPermissions(connection, member, workflows)).isZero();
+                assertThat(countPermissions(connection, custom, workflows)).isZero();
+                assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
+                // agent_executions carries no workflow state (the link lives in workflow_steps).
+                try (java.sql.ResultSet columns = statement.executeQuery("SELECT count(*) FROM information_schema.columns "
+                        + "WHERE table_name = 'agent_executions' AND column_name ~ 'workflow|run_id'")) {
+                    columns.next();
+                    assertThat(columns.getInt(1)).isZero();
+                }
+                // Hard limits live in the database: at most 8 steps per definition and run.
+                assertThatThrownBy(() -> statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, max_steps, created_by, "
+                        + "created_at, updated_at) VALUES ('" + UUID.randomUUID() + "', '" + organization + "', 'x', 9, '" + user + "', now(), now())"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, token_budget, created_by, "
+                        + "created_at, updated_at) VALUES ('" + UUID.randomUUID() + "', '" + organization + "', 'x', 0, '" + user + "', now(), now())"))
+                        .isInstanceOf(java.sql.SQLException.class);
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                for (String table : new String[] {"workflow_definitions", "workflow_participants", "workflow_runs", "workflow_steps", "workflow_messages"}) {
+                    statement.execute("SELECT count(*) FROM " + table);
+                }
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_runs ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
+                // The journal is append-only even for the role that may write to it.
+                statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, created_by, created_at, updated_at) VALUES ('"
+                        + "00000000-0000-0000-0000-0000000000d1', '" + organization + "', 'wf', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_runs (id, organization_id, definition_id, definition_version, snapshot, requested_by, objective, "
+                        + "status, total_steps, token_budget, deadline_at, created_at, updated_at) VALUES ('00000000-0000-0000-0000-0000000000e1', '"
+                        + organization + "', '00000000-0000-0000-0000-0000000000d1', 1, '{}', '" + user + "', 'o', 'PENDING', 1, 1000, now(), now(), now())");
+                statement.execute("INSERT INTO workflow_messages (id, organization_id, run_id, sequence, kind, body, created_at) VALUES ('"
+                        + UUID.randomUUID() + "', '" + organization + "', '00000000-0000-0000-0000-0000000000e1', 1, 'OBJECTIVE', 'o', now())");
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_messages SET body = 'changed'")).isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("DELETE FROM workflow_messages")).isInstanceOf(java.sql.SQLException.class);
             }
         }
     }

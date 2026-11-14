@@ -45,6 +45,9 @@
     "name" : "Departments",
     "description" : "Organizational units"
   }, {
+    "name" : "Workflows",
+    "description" : "Deterministic multi-agent pipelines: definitions"
+  }, {
     "name" : "Team agents",
     "description" : "AI agents participating in teams"
   }, {
@@ -60,6 +63,9 @@
     "name" : "Tool approvals",
     "description" : "A person approves or rejects ONE exact tool action of an AI agent"
   }, {
+    "name" : "Workflow runs",
+    "description" : "Runs of deterministic multi-agent pipelines: steps, messages and cancellation"
+  }, {
     "name" : "Members",
     "description" : "Organization memberships"
   }, {
@@ -67,6 +73,112 @@
     "description" : "Tool calls requested by AI agents and the tools granted to them"
   } ],
   "paths" : {
+    "/api/v1/organizations/{organizationId}/workflows/{workflowId}/steps" : {
+      "put" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Replace the ordered static steps (at most 8); every agent must be a participant",
+        "operationId" : "setWorkflowSteps",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetWorkflowStepsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflows/{workflowId}/participants" : {
+      "put" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Replace the participants: exactly the agents chosen here, never inherited from a team",
+        "operationId" : "setWorkflowParticipants",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetWorkflowParticipantsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/teams/{teamId}/leader" : {
       "put" : {
         "tags" : [ "Teams" ],
@@ -978,6 +1090,252 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/Organization"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflows" : {
+      "get" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Workflow definitions of the organization",
+        "operationId" : "listWorkflows",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "ARCHIVED" ]
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseWorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Create a workflow definition (no participants or steps yet)",
+        "operationId" : "createWorkflow",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateWorkflowRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflows/{workflowId}/runs" : {
+      "post" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Start a run (202: it executes asynchronously; poll the run)",
+        "operationId" : "startWorkflowRun",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/StartWorkflowRunRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "description" : "Accepted",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflows/{workflowId}/archive" : {
+      "post" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Archive a definition (runs in progress keep going)",
+        "operationId" : "archiveWorkflow",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/cancel" : {
+      "post" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Request cooperative cancellation: nothing new starts; started steps are not undone",
+        "operationId" : "cancelWorkflowRun",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowRun"
                 }
               }
             }
@@ -3288,6 +3646,100 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/workflows/{workflowId}" : {
+      "get" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "One workflow definition with its participants and steps",
+        "operationId" : "getWorkflow",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch" : {
+        "tags" : [ "Workflows" ],
+        "summary" : "Change the name, description or limits (a new version; runs in progress are unaffected)",
+        "operationId" : "updateWorkflow",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateWorkflowRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/teams/{teamId}" : {
       "get" : {
         "tags" : [ "Teams" ],
@@ -4214,6 +4666,249 @@
                   "items" : {
                     "$ref" : "#/components/schemas/PermissionDefinition"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Workflow runs of the organization, newest first",
+        "operationId" : "listWorkflowRuns",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "status",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
+          }
+        }, {
+          "name" : "workflowId",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseWorkflowRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "One workflow run with its state, budget and result",
+        "operationId" : "getWorkflowRun",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/steps" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Steps of a run in order; each is one agent execution",
+        "operationId" : "listWorkflowRunSteps",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseWorkflowStep"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/messages" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "The append-only journal of a run, in order",
+        "operationId" : "listWorkflowRunMessages",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseWorkflowMessage"
                 }
               }
             }
@@ -5180,6 +5875,200 @@
   },
   "components" : {
     "schemas" : {
+      "AuthenticatedUser" : {
+        "type" : "object",
+        "properties" : {
+          "userId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "displayName" : {
+            "type" : "string"
+          }
+        }
+      },
+      "SetWorkflowStepsRequest" : {
+        "type" : "object",
+        "properties" : {
+          "steps" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowStepInput"
+            },
+            "maxItems" : 8,
+            "minItems" : 1
+          }
+        }
+      },
+      "WorkflowStepInput" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "instruction" : {
+            "type" : "string",
+            "maxLength" : 2000,
+            "minLength" : 0
+          },
+          "inputsFrom" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            },
+            "maxItems" : 7,
+            "minItems" : 0
+          }
+        },
+        "required" : [ "instruction", "name" ]
+      },
+      "WorkflowDefinition" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "organizationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "ACTIVE", "ARCHIVED" ]
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "participants" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowParticipant"
+            }
+          },
+          "steps" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowStepDefinition"
+            }
+          },
+          "maxSteps" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "maxRetriesPerStep" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tokenBudget" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deadlineSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "createdBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "archivedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "WorkflowParticipant" : {
+        "type" : "object",
+        "properties" : {
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "agentName" : {
+            "type" : "string"
+          },
+          "agentStatus" : {
+            "type" : "string"
+          },
+          "addedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "addedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "WorkflowStepDefinition" : {
+        "type" : "object",
+        "properties" : {
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "instruction" : {
+            "type" : "string"
+          },
+          "inputsFrom" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "SetWorkflowParticipantsRequest" : {
+        "type" : "object",
+        "properties" : {
+          "agentIds" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "maxItems" : 16,
+            "minItems" : 0
+          }
+        }
+      },
       "AssignTeamLeaderRequest" : {
         "type" : "object",
         "description" : "The leader must be a current member. Null clears it.",
@@ -6066,6 +6955,140 @@
           }
         }
       },
+      "CreateWorkflowRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 0
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 2000,
+            "minLength" : 0
+          },
+          "maxSteps" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 8,
+            "minimum" : 1
+          },
+          "maxRetriesPerStep" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 2,
+            "minimum" : 0
+          },
+          "tokenBudget" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 10000000,
+            "minimum" : 1000
+          },
+          "deadlineSeconds" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 86400,
+            "minimum" : 30
+          }
+        },
+        "required" : [ "name" ]
+      },
+      "StartWorkflowRunRequest" : {
+        "type" : "object",
+        "properties" : {
+          "objective" : {
+            "type" : "string",
+            "maxLength" : 2000,
+            "minLength" : 0
+          },
+          "requestId" : {
+            "type" : "string",
+            "description" : "Optional idempotency key: repeating it never creates a second run",
+            "maxLength" : 64,
+            "minLength" : 1
+          }
+        },
+        "required" : [ "objective" ]
+      },
+      "WorkflowRun" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "organizationId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "definitionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "definitionVersion" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
+          },
+          "requestedBy" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "objective" : {
+            "type" : "string"
+          },
+          "totalSteps" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "nextRank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tokensUsed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tokenBudget" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deadlineAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "result" : {
+            "type" : "string"
+          },
+          "errorCode" : {
+            "type" : "string"
+          },
+          "errorMessage" : {
+            "type" : "string"
+          },
+          "cancelRequestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
       "CreateTeamRequest" : {
         "type" : "object",
         "description" : "When a leader is given, the leader is added as the first member.",
@@ -6447,24 +7470,6 @@
           }
         },
         "required" : [ "code", "name" ]
-      },
-      "AuthenticatedUser" : {
-        "type" : "object",
-        "properties" : {
-          "userId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "email" : {
-            "type" : "string"
-          },
-          "emailVerified" : {
-            "type" : "boolean"
-          },
-          "displayName" : {
-            "type" : "string"
-          }
-        }
       },
       "RejectToolActionRequest" : {
         "type" : "object",
@@ -7027,6 +8032,45 @@
           }
         }
       },
+      "UpdateWorkflowRequest" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "maxLength" : 120,
+            "minLength" : 1
+          },
+          "description" : {
+            "type" : "string",
+            "maxLength" : 2000,
+            "minLength" : 0
+          },
+          "maxSteps" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 8,
+            "minimum" : 1
+          },
+          "maxRetriesPerStep" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 2,
+            "minimum" : 0
+          },
+          "tokenBudget" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 10000000,
+            "minimum" : 1000
+          },
+          "deadlineSeconds" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 86400,
+            "minimum" : 30
+          }
+        }
+      },
       "UpdateTeamRequest" : {
         "type" : "object",
         "description" : "Omitted fields are left unchanged.",
@@ -7385,6 +8429,208 @@
           "totalPages" : {
             "type" : "integer",
             "format" : "int32"
+          }
+        }
+      },
+      "PageResponseWorkflowDefinition" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowDefinition"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseWorkflowRun" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowRun"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "PageResponseWorkflowStep" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowStep"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "WorkflowStep" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "runId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "attempt" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "agentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "agentName" : {
+            "type" : "string"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "executionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
+          },
+          "inputsFrom" : {
+            "type" : "string"
+          },
+          "resultSummary" : {
+            "type" : "string"
+          },
+          "errorCode" : {
+            "type" : "string"
+          },
+          "errorMessage" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PageResponseWorkflowMessage" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowMessage"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "WorkflowMessage" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sequence" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "stepRank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [ "OBJECTIVE", "ASSIGNMENT", "RESULT", "STATUS" ]
+          },
+          "body" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
           }
         }
       },

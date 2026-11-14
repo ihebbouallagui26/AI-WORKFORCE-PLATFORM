@@ -48,6 +48,9 @@ public enum Permission {
     AGENT_EXECUTION_READ("agent.execution.read"),
     APPROVAL_READ("approval.read"),
     APPROVAL_DECIDE("approval.decide"),
+    WORKFLOW_READ("workflow.read"),
+    WORKFLOW_MANAGE("workflow.manage"),
+    WORKFLOW_EXECUTE("workflow.execute"),
     /** Reserved to the built-in OWNER role: never grantable to custom roles. */
     OWNERSHIP_MANAGE("ownership.manage");
 

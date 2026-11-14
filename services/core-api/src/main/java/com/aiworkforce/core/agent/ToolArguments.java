@@ -37,6 +37,11 @@ final class ToolArguments {
     private ToolArguments() {
     }
 
+    /** Masks credential-looking values in free text (Bearer tokens, API keys, JWTs). */
+    static String maskSecrets(String text) {
+        return text == null ? "" : SECRET_VALUE.matcher(text).replaceAll(MASK);
+    }
+
     static String canonical(JsonNode node) {
         StringBuilder out = new StringBuilder();
         write(node, out);
