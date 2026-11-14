@@ -17,6 +17,7 @@ public record DepartmentView(
         EmployeeRef head,
         ArchiveStatus status,
         long employeeCount,
+        long agentCount,
         long childCount,
         Instant createdAt,
         Instant updatedAt,

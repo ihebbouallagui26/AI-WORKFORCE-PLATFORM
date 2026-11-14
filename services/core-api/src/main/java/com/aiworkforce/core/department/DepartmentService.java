@@ -8,6 +8,7 @@ import com.aiworkforce.core.common.exception.ConflictException;
 import com.aiworkforce.core.common.exception.ResourceNotFoundException;
 import com.aiworkforce.core.common.persistence.LikePatterns;
 import com.aiworkforce.core.identity.AuthenticatedUser;
+import com.aiworkforce.core.workforce.AgentDirectory;
 import com.aiworkforce.core.workforce.ArchiveStatus;
 import com.aiworkforce.core.workforce.EmployeeDirectory;
 import com.aiworkforce.core.workforce.EmployeeDirectory.EmployeeRef;
@@ -47,15 +48,17 @@ public class DepartmentService implements EmployeeLifecycleParticipant {
     private final TenantAccessService access;
     private final OrganizationLock lock;
     private final EmployeeDirectory employees;
+    private final AgentDirectory agents;
     private final AuditLog audit;
     private final Clock clock;
 
     public DepartmentService(DepartmentRepository departments, TenantAccessService access, OrganizationLock lock,
-            EmployeeDirectory employees, AuditLog audit, Clock clock) {
+            EmployeeDirectory employees, AgentDirectory agents, AuditLog audit, Clock clock) {
         this.departments = departments;
         this.access = access;
         this.lock = lock;
         this.employees = employees;
+        this.agents = agents;
         this.audit = audit;
         this.clock = clock;
     }
@@ -207,6 +210,9 @@ public class DepartmentService implements EmployeeLifecycleParticipant {
         if (employees.currentCountInDepartment(organizationId, departmentId) > 0) {
             throw new ConflictException("This department still has employees. Reassign them first.");
         }
+        if (agents.countInDepartment(organizationId, departmentId) > 0) {
+            throw new ConflictException("AI agents are still assigned to this department. Reassign them first.");
+        }
         if (departments.existsByOrganizationIdAndParentIdAndStatus(organizationId, departmentId, ArchiveStatus.ACTIVE)) {
             throw new ConflictException("This department still has active sub-departments. Archive or move them first.");
         }
@@ -252,7 +258,7 @@ public class DepartmentService implements EmployeeLifecycleParticipant {
             departments.flush();
         } catch (DataIntegrityViolationException e) {
             // Positions or teams still reference it (foreign keys).
-            throw new ConflictException("This department is used by positions or teams. Archive it instead.");
+            throw new ConflictException("This department is used by positions, teams or AI agents. Archive it instead.");
         }
         audit.record(organizationId, user.userId(), "department.deleted", "department", departmentId,
                 details("name", department.getName(), "code", department.getCode()));
@@ -314,6 +320,7 @@ public class DepartmentService implements EmployeeLifecycleParticipant {
                 .collect(Collectors.toSet());
         Map<UUID, EmployeeRef> heads = employees.findRefs(organizationId, headIds);
         Map<UUID, Long> employeeCounts = employees.currentCountByDepartment(organizationId);
+        Map<UUID, Long> agentCounts = agents.countByDepartment(organizationId);
         Map<UUID, Long> childCounts = new HashMap<>();
         for (Object[] row : departments.countChildrenByOrganization(organizationId,
                 list.stream().map(Department::getId).toList())) {
@@ -322,7 +329,7 @@ public class DepartmentService implements EmployeeLifecycleParticipant {
         return list.stream().map(d -> new DepartmentView(d.getId(), d.getOrganizationId(), d.getName(), d.getCode(),
                 d.getDescription(), d.getParentId(),
                 d.getHeadEmployeeId() == null ? null : heads.get(d.getHeadEmployeeId()),
-                d.getStatus(), employeeCounts.getOrDefault(d.getId(), 0L), childCounts.getOrDefault(d.getId(), 0L),
+                d.getStatus(), employeeCounts.getOrDefault(d.getId(), 0L), agentCounts.getOrDefault(d.getId(), 0L), childCounts.getOrDefault(d.getId(), 0L),
                 d.getCreatedAt(), d.getUpdatedAt(), d.getVersion())).toList();
     }
 

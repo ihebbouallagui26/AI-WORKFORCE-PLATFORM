@@ -33,6 +33,8 @@ describe('renderer IPC surface', () => {
   it('declares no token in any renderer-visible type', () => {
     const declarations = contract.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(declarations, /token/i);
+    // Provider credentials only travel in request bodies the renderer builds: no dedicated type exists.
+    assert.doesNotMatch(declarations, /credential|secret|api.?key/i);
   });
 
   it('keeps the renderer copy of the contract identical to the main-process one', () => {

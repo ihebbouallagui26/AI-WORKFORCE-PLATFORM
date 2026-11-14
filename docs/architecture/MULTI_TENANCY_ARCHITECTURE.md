@@ -37,7 +37,7 @@ Repositories are package-private (other modules call services). ArchUnit enforce
 
 Permission catalog (table `permissions`, seeded by V2, mirrored by the `Permission` enum; a test keeps them identical):
 
-`organization.read`, `organization.update`, `member.read`, `member.manage`, `member.roles.assign`, `role.read`, `role.manage`, `invitation.read`, `invitation.create`, `invitation.revoke`, `audit.read`, `ownership.manage` (B1), and since V3 (Sprint B2, workforce): `employee.read`, `employee.create`, `employee.manage`, `employee.deactivate`, `department.read`, `department.manage`, `position.read`, `position.manage`, `team.read`, `team.manage`. Their meaning and the built-in role matrix are in [WORKFORCE_MANAGEMENT_ARCHITECTURE.md](WORKFORCE_MANAGEMENT_ARCHITECTURE.md) §4.
+`organization.read`, `organization.update`, `member.read`, `member.manage`, `member.roles.assign`, `role.read`, `role.manage`, `invitation.read`, `invitation.create`, `invitation.revoke`, `audit.read`, `ownership.manage` (B1), and since V3 (Sprint B2, workforce): `employee.read`, `employee.create`, `employee.manage`, `employee.deactivate`, `department.read`, `department.manage`, `position.read`, `position.manage`, `team.read`, `team.manage`, and since V4 (Sprint B3, AI agents): `agent.read`, `agent.create`, `agent.manage`, `agent.activate`, `agent.archive`, `agent.tool.manage`, `provider.read`, `provider.connect`, `provider.manage`, `provider.test`, `skill.read`, `skill.manage` (matrix in [AI_AGENT_ARCHITECTURE.md](AI_AGENT_ARCHITECTURE.md) §3). Their meaning and the built-in role matrix are in [WORKFORCE_MANAGEMENT_ARCHITECTURE.md](WORKFORCE_MANAGEMENT_ARCHITECTURE.md) §4.
 
 | Built-in role | Permissions |
 | --- | --- |

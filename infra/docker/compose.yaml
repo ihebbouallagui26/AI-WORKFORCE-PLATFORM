@@ -127,6 +127,7 @@ services:
       # Inside the compose network the JWKS is fetched from the Keycloak container directly.
       OIDC_JWK_SET_URI: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/certs
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-ai-workforce-api}
+      SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:?SECRETS_MASTER_KEY is required (bash infra/docker/scripts/ensure-env.sh)}
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:4200}

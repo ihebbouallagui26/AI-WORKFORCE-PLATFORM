@@ -45,11 +45,12 @@ public class TeamController {
 
     @Schema(name = "Team")
     public record TeamResponse(UUID id, String name, String description, DepartmentRef department, EmployeeRef leader,
-            ArchiveStatus status, long memberCount, Instant createdAt, Instant updatedAt, long version) {
+            ArchiveStatus status, long memberCount, long agentCount, Instant createdAt, Instant updatedAt,
+            long version) {
 
         static TeamResponse of(TeamView v) {
             return new TeamResponse(v.id(), v.name(), v.description(), v.department(), v.leader(), v.status(),
-                    v.memberCount(), v.createdAt(), v.updatedAt(), v.version());
+                    v.memberCount(), v.agentCount(), v.createdAt(), v.updatedAt(), v.version());
         }
     }
 

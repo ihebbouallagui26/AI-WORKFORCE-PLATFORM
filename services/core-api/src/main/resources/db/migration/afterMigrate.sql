@@ -15,6 +15,10 @@ BEGIN
     IF to_regclass('public.permissions') IS NOT NULL THEN
         EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON TABLE public.permissions FROM %I', '${app_role}');
     END IF;
+    -- The tool registry is owned by migrations (read-only at runtime).
+    IF to_regclass('public.tool_definitions') IS NOT NULL THEN
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON TABLE public.tool_definitions FROM %I', '${app_role}');
+    END IF;
     -- The audit trail is append-only at runtime.
     IF to_regclass('public.audit_events') IS NOT NULL THEN
         EXECUTE format('REVOKE UPDATE, DELETE ON TABLE public.audit_events FROM %I', '${app_role}');

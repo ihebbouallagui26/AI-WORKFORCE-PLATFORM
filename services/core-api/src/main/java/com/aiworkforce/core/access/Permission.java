@@ -32,6 +32,18 @@ public enum Permission {
     POSITION_MANAGE("position.manage"),
     TEAM_READ("team.read"),
     TEAM_MANAGE("team.manage"),
+    AGENT_READ("agent.read"),
+    AGENT_CREATE("agent.create"),
+    AGENT_MANAGE("agent.manage"),
+    AGENT_ACTIVATE("agent.activate"),
+    AGENT_ARCHIVE("agent.archive"),
+    AGENT_TOOL_MANAGE("agent.tool.manage"),
+    PROVIDER_READ("provider.read"),
+    PROVIDER_CONNECT("provider.connect"),
+    PROVIDER_MANAGE("provider.manage"),
+    PROVIDER_TEST("provider.test"),
+    SKILL_READ("skill.read"),
+    SKILL_MANAGE("skill.manage"),
     /** Reserved to the built-in OWNER role: never grantable to custom roles. */
     OWNERSHIP_MANAGE("ownership.manage");
 

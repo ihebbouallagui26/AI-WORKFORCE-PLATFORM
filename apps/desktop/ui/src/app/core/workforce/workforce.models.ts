@@ -35,6 +35,8 @@ export interface DepartmentDto {
   readonly head: EmployeeRefDto | null;
   readonly status: ArchiveStatus;
   readonly employeeCount: number;
+  /** AI agents assigned to the department (counted apart from human employees). */
+  readonly agentCount: number;
   readonly childCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -139,6 +141,8 @@ export interface TeamDto {
   readonly leader: EmployeeRefDto | null;
   readonly status: ArchiveStatus;
   readonly memberCount: number;
+  /** AI agents currently in the team (counted apart from human members). */
+  readonly agentCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly version: number;

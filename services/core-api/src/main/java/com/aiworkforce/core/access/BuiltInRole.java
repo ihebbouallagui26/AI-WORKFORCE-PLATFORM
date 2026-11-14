@@ -17,7 +17,7 @@ public enum BuiltInRole {
     MEMBER("Member", "Standard access to the organization.",
             EnumSet.of(Permission.ORGANIZATION_READ, Permission.MEMBER_READ, Permission.ROLE_READ,
                     Permission.EMPLOYEE_READ, Permission.DEPARTMENT_READ, Permission.POSITION_READ,
-                    Permission.TEAM_READ));
+                    Permission.TEAM_READ, Permission.AGENT_READ, Permission.SKILL_READ));
 
     private final String displayName;
     private final String description;

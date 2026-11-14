@@ -209,6 +209,44 @@ const ALLOWED_ROUTES: ReadonlyArray<{ readonly method: ApiMethod; readonly patte
   ['GET', `${ORG}/teams/${UUID}/members`],
   ['POST', `${ORG}/teams/${UUID}/members`],
   ['DELETE', `${ORG}/teams/${UUID}/members/${UUID}`],
+  // AI agents, providers, skills and tools (Sprint B3). Provider credentials only ever travel in the
+  // BODY of `POST connections` and `PUT connections/{id}/credential` (write-only) and are never returned.
+  ['GET', '/api/v1/providers/types'],
+  ['GET', `${ORG}/providers/connections`],
+  ['POST', `${ORG}/providers/connections`],
+  ['GET', `${ORG}/providers/connections/${UUID}`],
+  ['PATCH', `${ORG}/providers/connections/${UUID}`],
+  ['PUT', `${ORG}/providers/connections/${UUID}/credential`],
+  ['POST', `${ORG}/providers/connections/${UUID}/test`],
+  ['GET', `${ORG}/providers/connections/${UUID}/models`],
+  ['DELETE', `${ORG}/providers/connections/${UUID}`],
+  ['GET', `${ORG}/agents`],
+  ['POST', `${ORG}/agents`],
+  ['GET', `${ORG}/agents/${UUID}`],
+  ['PATCH', `${ORG}/agents/${UUID}`],
+  ['PUT', `${ORG}/agents/${UUID}/department`],
+  ['POST', `${ORG}/agents/${UUID}/activate`],
+  ['POST', `${ORG}/agents/${UUID}/pause`],
+  ['POST', `${ORG}/agents/${UUID}/archive`],
+  ['GET', `${ORG}/agents/${UUID}/history`],
+  ['GET', `${ORG}/agents/${UUID}/providers`],
+  ['POST', `${ORG}/agents/${UUID}/providers`],
+  ['PATCH', `${ORG}/agents/${UUID}/providers/${UUID}`],
+  ['DELETE', `${ORG}/agents/${UUID}/providers/${UUID}`],
+  ['GET', `${ORG}/agents/${UUID}/skills`],
+  ['PUT', `${ORG}/agents/${UUID}/skills`],
+  ['GET', `${ORG}/agents/${UUID}/tools`],
+  ['PUT', `${ORG}/agents/${UUID}/tools`],
+  ['GET', `${ORG}/agents/${UUID}/memory-config`],
+  ['PUT', `${ORG}/agents/${UUID}/memory-config`],
+  ['GET', `${ORG}/skills`],
+  ['POST', `${ORG}/skills`],
+  ['PATCH', `${ORG}/skills/${UUID}`],
+  ['DELETE', `${ORG}/skills/${UUID}`],
+  ['GET', `${ORG}/tools`],
+  ['GET', `${ORG}/teams/${UUID}/agents`],
+  ['POST', `${ORG}/teams/${UUID}/agents`],
+  ['DELETE', `${ORG}/teams/${UUID}/agents/${UUID}`],
 ].map(([method, path]) => ({ method: method as ApiMethod, pattern: new RegExp(`^${path}$`) }));
 
 const UUID_VALUE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -228,6 +266,10 @@ const ALLOWED_QUERY: Readonly<Record<string, RegExp>> = {
   rootOnly: BOOLEAN_VALUE,
   includeArchived: BOOLEAN_VALUE,
   includeFormer: BOOLEAN_VALUE,
+  // Agents, providers and skills (Sprint B3).
+  type: /^[A-Z_]{1,20}$/,
+  active: BOOLEAN_VALUE,
+  category: /^[A-Za-z0-9 &/_.-]{1,40}$/,
 };
 
 export const MAX_BODY_BYTES = 64 * 1024;

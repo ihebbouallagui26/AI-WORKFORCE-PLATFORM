@@ -148,6 +148,50 @@ describe('resolveApiRequest', () => {
     }
   });
 
+  it('allows the agent, provider, skill and tool operations of Sprint B3', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const allowed = [
+      { method: 'GET', path: `${base}/agents`, query: { q: 'atlas', status: 'ACTIVE', departmentId: ORG, page: 0, size: 20 } },
+      { method: 'POST', path: `${base}/agents`, body: { name: 'Atlas' } },
+      { method: 'POST', path: `${base}/agents/${ORG}/activate`, body: {} },
+      { method: 'PUT', path: `${base}/agents/${ORG}/tools`, body: { grants: [] } },
+      { method: 'PUT', path: `${base}/agents/${ORG}/memory-config`, body: { enabled: false } },
+      { method: 'POST', path: `${base}/agents/${ORG}/providers`, body: { modelId: 'm' } },
+      { method: 'PATCH', path: `${base}/agents/${ORG}/providers/${ORG}`, body: { makePrimary: true } },
+      { method: 'GET', path: `${base}/providers/connections`, query: { type: 'OPENAI', status: 'VALID' } },
+      { method: 'POST', path: `${base}/providers/connections`, body: { providerType: 'OPENAI', displayName: 'x', credential: 'write-only' } },
+      { method: 'PUT', path: `${base}/providers/connections/${ORG}/credential`, body: { credential: 'write-only' } },
+      { method: 'POST', path: `${base}/providers/connections/${ORG}/test`, body: {} },
+      { method: 'GET', path: `${base}/providers/connections/${ORG}/models` },
+      { method: 'GET', path: '/api/v1/providers/types' },
+      { method: 'GET', path: `${base}/skills`, query: { active: true, category: 'Engineering' } },
+      { method: 'GET', path: `${base}/tools` },
+      { method: 'POST', path: `${base}/teams/${ORG}/agents`, body: { agentId: ORG } },
+    ];
+    for (const request of allowed) {
+      assert.ok(resolveApiRequest(request, API).ok, JSON.stringify(request));
+    }
+  });
+
+  it('refuses agent and provider requests that are malformed or not part of the API', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const refused = [
+      { method: 'DELETE', path: `${base}/agents/${ORG}` },
+      { method: 'GET', path: `${base}/providers/connections/${ORG}/credential` },
+      { method: 'GET', path: `${base}/providers/connections/${ORG}/secret` },
+      { method: 'POST', path: `${base}/agents/${ORG}/run`, body: {} },
+      { method: 'POST', path: `${base}/agents/${ORG}/execute`, body: {} },
+      { method: 'POST', path: `${base}/tools/execute`, body: {} },
+      { method: 'GET', path: `${base}/agents`, query: { type: 'openai' } },
+      { method: 'GET', path: `${base}/skills`, query: { category: '<script>' } },
+      { method: 'GET', path: `${base}/skills`, query: { active: 'maybe' } },
+      { method: 'PUT', path: `${base}/providers/connections/${ORG}/credential`, query: { credential: 'in-the-url' }, body: {} },
+    ];
+    for (const request of refused) {
+      assert.equal(resolveApiRequest(request, API).ok, false, JSON.stringify(request));
+    }
+  });
+
   it('validates bodies', () => {
     assert.equal(resolveApiRequest('GET /api/v1/me', API).ok, false);
     assert.equal(resolveApiRequest({ method: 'GET', path: '/api/v1/me', body: { a: 1 } }, API).ok, false);

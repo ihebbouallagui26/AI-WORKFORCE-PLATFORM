@@ -54,6 +54,17 @@ class ApiDocumentationIntegrationTest {
                 .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/invitations'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/invitations/accept'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/permissions'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/agents'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/agents/{agentId}/activate'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/agents/{agentId}/providers'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/agents/{agentId}/tools'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/agents/{agentId}/memory-config'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/providers/connections'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/test'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/providers/connections/{connectionId}/credential'].put").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/skills'].post").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/tools'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/teams/{teamId}/agents'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees'].post").exists())
                 .andExpect(jsonPath("$.paths['/api/v1/organizations/{organizationId}/employees/{employeeId}'].patch").exists())
@@ -72,6 +83,13 @@ class ApiDocumentationIntegrationTest {
         JsonMapper mapper = JsonMapper.builder().build();
         JsonNode document = mapper.readTree(json);
         document.get("paths").propertyNames().forEach(path -> assertThat(path).startsWith("/api/"));
+        // Credentials are write-only: they appear in requests only, never in a response schema.
+        JsonNode schemas = document.get("components").get("schemas");
+        assertThat(schemas.get("ProviderConnection").get("properties").propertyNames())
+                .noneMatch(name -> name.toLowerCase().contains("credential") || name.toLowerCase().contains("secret")
+                        || name.toLowerCase().contains("apikey") || name.toLowerCase().contains("token"));
+        assertThat(schemas.get("CreateProviderConnectionRequest").get("properties").get("credential").get("writeOnly").asBoolean())
+                .isTrue();
         // No schema exposes invitation secrets.
         assertThat(document.get("components").get("schemas").toString()).doesNotContain("tokenHash");
         assertThat(document.get("components").get("schemas").get("Invitation").get("properties").has("token"))

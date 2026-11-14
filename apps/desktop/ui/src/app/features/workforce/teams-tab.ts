@@ -1,4 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { AgentsApi } from '../../core/agents/agents.api';
+import { TeamAgent } from '../../core/agents/agents.models';
+import { AgentsStore } from '../../core/agents/agents.store';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { ToastService } from '../../core/services/toast.service';
 import { orgResource } from '../../core/workforce/org-resource';
@@ -43,7 +46,7 @@ import { ARCHIVE_LABEL, ARCHIVE_TONE, idOrNull } from './workforce-format';
                 <li>
                   <button type="button" class="item" [class.is-selected]="team.id === selectedId()" (click)="selectedId.set(team.id)">
                     <span class="item__name">{{ team.name }}</span>
-                    <span class="text-tertiary">{{ team.department?.name ?? 'No department' }} · {{ team.memberCount }} member(s)</span>
+                    <span class="text-tertiary">{{ team.department?.name ?? 'No department' }} · {{ team.memberCount }} member(s) · {{ team.agentCount }} AI agent(s)</span>
                     @if (team.status === 'ARCHIVED') { <ui-badge label="Archived" tone="neutral" [dot]="false" /> }
                   </button>
                 </li>
@@ -111,6 +114,31 @@ import { ARCHIVE_LABEL, ARCHIVE_TONE, idOrNull } from './workforce-format';
                 } @empty { <li class="text-tertiary">This team has no member yet.</li> }
               </ul>
             }
+
+            @if (store.can('agent.read')) {
+              <h3 class="section">AI agents ({{ teamAgents().length }})</h3>
+              <p class="text-tertiary">AI agents are listed apart from human members and never count as employees.</p>
+              @if (store.can('team.manage') && team.status === 'ACTIVE') {
+                <div class="controls">
+                  <label class="sr-only" for="t-add-agent">Add an AI agent</label>
+                  <select id="t-add-agent" class="select" #agentCandidate>
+                    <option value="">Add an AI agent…</option>
+                    @for (agent of agentCandidates(); track agent.id) { <option [value]="agent.id">{{ agent.name }} (&#64;{{ agent.handle }})</option> }
+                  </select>
+                  <button type="button" class="btn btn--secondary btn--sm" (click)="addAgent(team, agentCandidate.value); agentCandidate.value = ''">Add</button>
+                </div>
+              }
+              <ul class="plain">
+                @for (entry of teamAgents(); track entry.agent.id) {
+                  <li>
+                    <span>{{ entry.agent.name }} <ui-badge label="AI" tone="ai" [dot]="false" /></span>
+                    @if (store.can('team.manage') && team.status === 'ACTIVE') {
+                      <button type="button" class="btn btn--ghost btn--sm danger" (click)="removeAgent(team, entry)">Remove</button>
+                    }
+                  </li>
+                } @empty { <li class="text-tertiary">No AI agent in this team.</li> }
+              </ul>
+            }
           </ui-panel>
         } @else {
           <ui-empty-state icon="users" heading="Select a team" [compact]="true" description="Choose a team to see and manage its members." />
@@ -156,6 +184,20 @@ export class WfTeams {
     (organizationId, teamId) => this.api.getTeam(organizationId, teamId ?? ''),
   );
   protected readonly members = computed<readonly TeamMemberDto[]>(() => this.detail.value()?.members ?? []);
+  protected readonly agentDirectory = inject(AgentsStore);
+  private readonly agentApi = inject(AgentsApi);
+  private readonly agentList = orgResource<TeamAgent[], string | null>(
+    this.store.organizationId,
+    () => this.selected() !== null && this.store.can('team.read') && this.store.can('agent.read'),
+    () => this.selectedId(),
+    (organizationId, teamId) => this.agentApi.teamAgents(organizationId, teamId ?? ''),
+  );
+  protected readonly teamAgents = computed<readonly TeamAgent[]>(() => this.agentList.value() ?? []);
+  /** Agents (not archived) that are not yet in the team. */
+  protected readonly agentCandidates = computed(() => {
+    const inTeam = new Set(this.teamAgents().map((a) => a.agent.id));
+    return this.agentDirectory.agents().filter((a) => a.status !== 'ARCHIVED' && !inTeam.has(a.id));
+  });
   /** Current employees who are not yet in the team. */
   protected readonly candidates = computed(() => {
     const inTeam = new Set(this.members().map((m) => m.employee.id));
@@ -207,6 +249,25 @@ export class WfTeams {
     }
   }
 
+  protected async addAgent(team: TeamDto, agentId: string): Promise<void> {
+    if (!agentId) {
+      return;
+    }
+    await this.run('AI agent added', (id) => this.agentApi.addTeamAgent(id, team.id, agentId));
+  }
+
+  protected async removeAgent(team: TeamDto, entry: TeamAgent): Promise<void> {
+    const answer = await this.confirm.ask({
+      title: `Remove ${entry.agent.name}?`,
+      message: 'The AI agent leaves the team. The assignment history is kept.',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (answer.confirmed) {
+      await this.run('AI agent removed', (id) => this.agentApi.removeTeamAgent(id, team.id, entry.agent.id));
+    }
+  }
+
   protected archive(team: TeamDto): Promise<void> {
     return this.run('Team archived', (id) => this.api.archiveTeam(id, team.id));
   }
@@ -219,9 +280,12 @@ export class WfTeams {
     try {
       await this.store.mutate(change);
       this.detail.reload();
+      this.agentList.reload();
+      this.agentDirectory.reload();
       this.toast.success(success);
     } catch (error) {
       this.detail.reload();
+      this.agentList.reload();
       this.toast.error('Action failed', error);
     }
   }

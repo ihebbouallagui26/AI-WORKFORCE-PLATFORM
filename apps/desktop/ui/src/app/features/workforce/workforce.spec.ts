@@ -457,7 +457,8 @@ describe('Organization page and routing', () => {
     await settle(fixture);
     expect(text(el)).toContain('Invite a collaborator');
     expect(text(el)).toContain('AI agents');
-    expect(text(el)).toContain('Demo data');
+    expect(text(el)).toContain('Managed separately from employees');
+    expect(text(el)).not.toContain('Demo data');
     granted.set(new Set<PermissionCode>(READ_ONLY));
     await settle(fixture);
     expect(text(el)).not.toContain('Invite a collaborator');

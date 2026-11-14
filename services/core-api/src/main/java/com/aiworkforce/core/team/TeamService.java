@@ -10,6 +10,7 @@ import com.aiworkforce.core.common.persistence.LikePatterns;
 import com.aiworkforce.core.department.DepartmentDirectory;
 import com.aiworkforce.core.department.DepartmentRef;
 import com.aiworkforce.core.identity.AuthenticatedUser;
+import com.aiworkforce.core.workforce.AgentDirectory;
 import com.aiworkforce.core.workforce.ArchiveStatus;
 import com.aiworkforce.core.workforce.EmployeeDirectory;
 import com.aiworkforce.core.workforce.EmployeeDirectory.EmployeeRef;
@@ -47,18 +48,20 @@ public class TeamService implements EmployeeLifecycleParticipant {
     private final OrganizationLock lock;
     private final DepartmentDirectory departments;
     private final EmployeeDirectory employees;
+    private final AgentDirectory agents;
     private final AuditLog audit;
     private final Clock clock;
 
     public TeamService(TeamRepository teams, TeamMemberRepository members, TenantAccessService access,
-            OrganizationLock lock, DepartmentDirectory departments, EmployeeDirectory employees, AuditLog audit,
-            Clock clock) {
+            OrganizationLock lock, DepartmentDirectory departments, EmployeeDirectory employees, AgentDirectory agents,
+            AuditLog audit, Clock clock) {
         this.teams = teams;
         this.members = members;
         this.access = access;
         this.lock = lock;
         this.departments = departments;
         this.employees = employees;
+        this.agents = agents;
         this.audit = audit;
         this.clock = clock;
     }
@@ -304,10 +307,11 @@ public class TeamService implements EmployeeLifecycleParticipant {
                 list.stream().map(Team::getId).toList())) {
             counts.put((UUID) row[0], (Long) row[1]);
         }
+        Map<UUID, Long> agentCounts = agents.countByTeam(organizationId);
         return list.stream().map(t -> new TeamView(t.getId(), t.getOrganizationId(), t.getName(), t.getDescription(),
                 t.getDepartmentId() == null ? null : departmentRefs.get(t.getDepartmentId()),
                 t.getLeaderEmployeeId() == null ? null : leaders.get(t.getLeaderEmployeeId()), t.getStatus(),
-                counts.getOrDefault(t.getId(), 0L), t.getCreatedAt(), t.getUpdatedAt(), t.getVersion())).toList();
+                counts.getOrDefault(t.getId(), 0L), agentCounts.getOrDefault(t.getId(), 0L), t.getCreatedAt(), t.getUpdatedAt(), t.getVersion())).toList();
     }
 
     private List<TeamView.Member> memberViews(UUID organizationId, Team team, boolean includeFormer) {

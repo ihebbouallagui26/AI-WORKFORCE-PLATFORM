@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("3");
+            assertThat(result.targetSchemaVersion).isEqualTo("4");
         }
     }
 
@@ -168,7 +168,7 @@ class DatabaseSecurityIntegrationTest {
             }
 
             // V1 and V2 stay valid and V3 applies on top of the existing data.
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("3").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("3");
@@ -184,7 +184,7 @@ class DatabaseSecurityIntegrationTest {
                 assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
             }
             // Validation (checksums of V1..V3) still passes, and the runtime role has data access only.
-            flyway.apply("latest").validate();
+            flyway.apply("3").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
@@ -194,6 +194,89 @@ class DatabaseSecurityIntegrationTest {
                 assertThatThrownBy(() -> statement.execute("CREATE TABLE intruder (id int)"))
                         .isInstanceOf(java.sql.SQLException.class);
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE departments ADD COLUMN x int"))
+                        .isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A B2 database (V1..V3 with organizations whose built-in roles hold the workforce permissions)
+     * upgrades to V4: agent permissions are granted to the built-in roles (OWNER/ADMIN all twelve,
+     * MEMBER the two reads), custom roles are untouched, the tool registry is seeded and read-only
+     * for the runtime role, and applied migrations stay valid.
+     */
+    @Test
+    void upgradesAnExistingB2DatabaseAndBackfillsAgentPermissions() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("3").migrate();
+
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID owner = UUID.randomUUID();
+            UUID admin = UUID.randomUUID();
+            UUID member = UUID.randomUUID();
+            UUID custom = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'b2@example.test', true, 'B2', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing B2 organization', '" + user + "', now(), now())");
+                String roles = "INSERT INTO roles (id, organization_id, code, name, built_in, created_at, updated_at) VALUES ";
+                statement.execute(roles + "('" + owner + "', '" + organization + "', 'OWNER', 'Owner', true, now(), now()), ('"
+                        + admin + "', '" + organization + "', 'ADMIN', 'Administrator', true, now(), now()), ('"
+                        + member + "', '" + organization + "', 'MEMBER', 'Member', true, now(), now())");
+                statement.execute("INSERT INTO roles (id, organization_id, name, built_in, created_at, updated_at) VALUES ('"
+                        + custom + "', '" + organization + "', 'HR assistant', false, now(), now())");
+                for (UUID role : new UUID[] {owner, admin, member, custom}) {
+                    statement.execute("INSERT INTO role_permissions (role_id, organization_id, permission_code) VALUES ('"
+                            + role + "', '" + organization + "', 'employee.read')");
+                }
+            }
+
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("4");
+
+            String agentPermissions = "^(agent|provider|skill)[.]";
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword())) {
+                assertThat(countPermissions(connection, owner, agentPermissions)).isEqualTo(12);
+                assertThat(countPermissions(connection, admin, agentPermissions)).isEqualTo(12);
+                assertThat(countPermissions(connection, member, agentPermissions)).isEqualTo(2);
+                assertThat(countPermissions(connection, member, "^(agent|skill)[.]read$")).isEqualTo(2);
+                // Plain members never see provider connections; custom roles are never widened.
+                assertThat(countPermissions(connection, member, "^provider[.]")).isZero();
+                assertThat(countPermissions(connection, custom, ".")).isEqualTo(1);
+                try (java.sql.Statement statement = connection.createStatement();
+                        java.sql.ResultSet rows = statement.executeQuery("SELECT count(*) FROM tool_definitions")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(6);
+                }
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM agents");
+                statement.execute("SELECT count(*) FROM secret_entries");
+                // The tool registry belongs to migrations; the runtime role cannot change it or the schema.
+                assertThatThrownBy(() -> statement.execute("UPDATE tool_definitions SET enabled = false"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("INSERT INTO tool_definitions (code, name, description, category, "
+                        + "risk, max_level) VALUES ('rogue.tool', 'x', 'x', 'x', 'LOW', 'READ')"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE agents ADD COLUMN x int"))
                         .isInstanceOf(java.sql.SQLException.class);
             }
         }

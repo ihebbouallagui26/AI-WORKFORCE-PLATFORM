@@ -32,7 +32,12 @@ export const routes: Routes = [
         path: 'agents',
         title: 'Agents',
         data: { title: 'Agents' },
-        loadChildren: () => import('./features/agents/agents.routes').then((m) => m.AGENTS_ROUTES),
+        // With the Core API (api mode) agents are managed for real; the Phase A demo (mock data,
+        // detail pages) stays available in the mock build and the unit tests.
+        loadChildren: () =>
+          inject(AUTH_REQUIRED)
+            ? import('./features/ai-agents/ai-agents.routes').then((m) => m.AI_AGENTS_ROUTES)
+            : import('./features/agents/agents.routes').then((m) => m.AGENTS_ROUTES),
       },
       {
         path: 'organization',

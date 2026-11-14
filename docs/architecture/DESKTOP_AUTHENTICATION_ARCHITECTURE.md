@@ -39,7 +39,7 @@ If the OS cannot protect secrets (`safeStorage` unavailable, or Linux `basic_tex
 
 The renderer sends `{ method, path, query?, body? }`. The main process (`auth/api-proxy.ts`, `auth/auth-policy.ts`):
 
-- matches method + path against an **explicit allowlist** of Core API operations (UUID-shaped path parameters, no `..`, no other origin, no query string in the path). Since Sprint B2 the list includes the workforce operations (departments, positions, employees, teams — one entry per method and path; there is no employee delete);
+- matches method + path against an **explicit allowlist** of Core API operations (UUID-shaped path parameters, no `..`, no other origin, no query string in the path). Since Sprint B2 the list includes the workforce operations (departments, positions, employees, teams — one entry per method and path; there is no employee delete). Since Sprint B3 it also covers agents (lifecycle, bindings, skills, tool grants, memory configuration, history), provider connections (credential `PUT`/`POST` bodies, `test`, `models`), skills, the tool registry and team agents; there is no operation to read a credential, run an agent or call a tool, and query filters `type`, `active` and `category` are validated;
 - accepts only `page`, `size`, `includeSuspended` and the workforce filters (`q` ≤ 100 characters without control characters, `status`, `departmentId`, `positionId`, `managerId`, `parentId` as UUIDs, `rootOnly`, `includeArchived`, `includeFormer`) with strict patterns; JSON bodies ≤ 64 KB, never for GET/DELETE;
 - adds `Authorization: Bearer <access token>`, `redirect: 'error'`, 15 s timeout, 2 MB response cap;
 - on 401 refreshes once and retries; then reports `unauthenticated`;

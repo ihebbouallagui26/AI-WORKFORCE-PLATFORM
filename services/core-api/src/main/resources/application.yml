@@ -102,6 +102,19 @@ app:
       issuer: ${OIDC_ISSUER:}
       jwk-set-uri: ${OIDC_JWK_SET_URI:}
       audience: ${OIDC_AUDIENCE:}
+  secrets:
+    # Master key of the secret store (AES-256, 32 random bytes, base64). Required, no default:
+    # generate with `openssl rand -base64 32`. Never commit it.
+    master-key: ${SECRETS_MASTER_KEY:}
+  providers:
+    # Fixed official endpoints (server-side configuration, never user input).
+    timeout: 10s
+    anthropic:
+      base-url: https://api.anthropic.com
+    openai:
+      base-url: https://api.openai.com
+    gemini:
+      base-url: https://generativelanguage.googleapis.com
   invitations:
     ttl: 7d
     mail-from: ${INVITATION_MAIL_FROM:no-reply@aiworkforce.local}
