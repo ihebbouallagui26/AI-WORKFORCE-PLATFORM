@@ -81,6 +81,11 @@ export function resolveRendererPath(root: string, requestUrl: string): RendererP
   if (pathname.includes('\0')) {
     return { kind: 'reject', status: 400 };
   }
+  // A backslash separates path segments on Windows only: refuse it on every platform so that
+  // `..%5c..%5c` cannot traverse where `path.resolve` would treat it as an ordinary character.
+  if (pathname.includes('\\')) {
+    return { kind: 'reject', status: 403 };
+  }
 
   const normalizedRoot = path.resolve(root);
   const filePath = path.resolve(normalizedRoot, `.${pathname}`);
