@@ -102,6 +102,24 @@ app:
       issuer: ${OIDC_ISSUER:}
       jwk-set-uri: ${OIDC_JWK_SET_URI:}
       audience: ${OIDC_AUDIENCE:}
+  orchestrator:
+    # Keycloak client id of the AI orchestrator service account (azp claim): accepted on /api/v1/internal/** only.
+    client-id: ${ORCHESTRATOR_CLIENT_ID:ai-orchestrator}
+    # Outbound: the Core API calls the orchestrator with its own service account. Blank = dispatching disabled.
+    dispatch:
+      base-url: ${ORCHESTRATOR_URL:}
+      # Defaults to the token endpoint of the same realm as the accepted tokens (OIDC_ISSUER).
+      token-url: ${ORCHESTRATOR_TOKEN_URL:${OIDC_ISSUER:}/protocol/openid-connect/token}
+      client-id: ${CORE_API_SERVICE_CLIENT_ID:ai-workforce-core-api}
+      client-secret: ${CORE_API_SERVICE_CLIENT_SECRET:}
+  executions:
+    # An execution still PENDING/RUNNING after this long is failed (TIMEOUT).
+    timeout: ${EXECUTIONS_TIMEOUT:PT5M}
+    max-concurrent-per-organization: ${EXECUTIONS_MAX_CONCURRENT:3}
+    max-result-chars: 60000
+    # Hand-over pool (short HTTP calls to the orchestrator). Saturated = the launch is failed with DISPATCH_CAPACITY_EXCEEDED.
+    dispatch-max-threads: ${EXECUTIONS_DISPATCH_MAX_THREADS:4}
+    dispatch-queue-capacity: ${EXECUTIONS_DISPATCH_QUEUE:50}
   secrets:
     # Master key of the secret store (AES-256, 32 random bytes, base64). Required, no default:
     # generate with `openssl rand -base64 32`. Never commit it.

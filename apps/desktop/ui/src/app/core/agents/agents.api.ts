@@ -3,6 +3,7 @@ import { BackendClient } from '../identity/backend-client';
 import {
   AgentBinding,
   AgentDetail,
+  AgentExecution,
   AgentDraft,
   AgentMemoryConfig,
   AgentQuery,
@@ -14,6 +15,7 @@ import {
   BindingOptions,
   ConnectionStatus,
   ConnectionTestResult,
+  ExecutionStatus,
   HistoryEntry,
   Page,
   ProviderConnection,
@@ -95,6 +97,25 @@ export class AgentsApi {
 
   agentHistory(organizationId: string, id: string, page = 0, size = 20): Promise<Page<HistoryEntry>> {
     return this.http.get(`${org(organizationId)}/agents/${uuid(id)}/history`, { page, size });
+  }
+
+  // ---------------------------------------------------------------- supervised executions
+
+  /** Launches a run (202: it executes asynchronously; poll {@link getExecution}). Instruction only: no provider or key. */
+  startExecution(organizationId: string, agentId: string, task: string): Promise<AgentExecution> {
+    return this.http.post(`${org(organizationId)}/agents/${uuid(agentId)}/executions`, { task });
+  }
+
+  listExecutions(
+    organizationId: string,
+    agentId: string,
+    query: { status?: ExecutionStatus; page?: number; size?: number } = {},
+  ): Promise<Page<AgentExecution>> {
+    return this.http.get(`${org(organizationId)}/agents/${uuid(agentId)}/executions`, clean({ size: 10, ...query }));
+  }
+
+  getExecution(organizationId: string, executionId: string): Promise<AgentExecution> {
+    return this.http.get(`${org(organizationId)}/executions/${uuid(executionId)}`);
   }
 
   // ---------------------------------------------------------------- configuration

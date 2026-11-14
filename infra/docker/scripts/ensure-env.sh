@@ -15,6 +15,7 @@ chmod 600 "$target" 2>/dev/null || true
 
 added=()
 while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"   # tolerate CRLF checkouts (Windows): a trailing CR must never become part of a value
   [[ "$line" =~ ^[A-Z0-9_]+= ]] || continue
   key="${line%%=*}"
   value="${line#*=}"

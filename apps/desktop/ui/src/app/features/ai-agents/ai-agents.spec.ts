@@ -254,7 +254,7 @@ describe('Agent detail', () => {
     await settle(fixture);
     expect(buttons(el)).toContain('Activate');
     expect(buttons(el)).toContain('Archive');
-    expect(text(el)).toContain('not run in this version');
+    expect(text(el)).toContain('launched by a person');
     granted.set(new Set<PermissionCode>(MEMBER));
     await settle(fixture);
     expect(buttons(el)).not.toContain('Activate');
@@ -378,6 +378,72 @@ describe('Providers tab', () => {
     button(el, 'Validate')!.click();
     await settle(fixture);
     expect(desktop.to(`/providers/connections/${id(10)}/test`, 'POST')).toHaveLength(1);
+  });
+});
+
+describe('Provider credential hygiene (renderer)', () => {
+  async function openForm() {
+    const ctx = setup(ALL);
+    const { fixture, el } = render(ProvidersTab);
+    await settle(fixture);
+    button(el, 'Connect a provider')!.click();
+    await settle(fixture);
+    typeInto(el.querySelector('#pc-name') as HTMLInputElement, 'Prod key');
+    const field = el.querySelector('#pc-credential') as HTMLInputElement;
+    return { ...ctx, fixture, el, field };
+  }
+
+  it('asks the browser not to autofill, correct, capitalize or remember the key', async () => {
+    const { field } = await openForm();
+    expect(field.type).toBe('password');
+    expect(field.getAttribute('autocomplete')).toBe('new-password');
+    expect(field.getAttribute('spellcheck')).toBe('false');
+    expect(field.getAttribute('autocapitalize')).toBe('off');
+    expect(field.getAttribute('autocorrect')).toBe('off');
+    expect(field.getAttribute('data-1p-ignore')).toBe('true');
+    expect(field.getAttribute('data-lpignore')).toBe('true');
+  });
+
+  it('empties the field before the request completes', async () => {
+    const { desktop, fixture, el, field } = await openForm();
+    let release!: (response: ApiResponse) => void;
+    desktop.handler = (request) =>
+      request.method === 'POST' && request.path.endsWith('/providers/connections')
+        ? new Promise<ApiResponse>((resolve) => (release = resolve))
+        : ok(page([]));
+    typeInto(field, 'sk-test-0123456789abcdef');
+    (el.querySelector('#provider-form') as HTMLFormElement).dispatchEvent(new Event('submit'));
+    await settle(fixture);
+    expect(desktop.to('/providers/connections', 'POST')).toHaveLength(1);
+    expect(field.value).toBe('');
+    release(ok(connection(12, 'Prod key')));
+    await settle(fixture);
+  });
+
+  it('wipes the typed key when the window loses focus', async () => {
+    const { fixture, field } = await openForm();
+    typeInto(field, 'sk-test-0123456789abcdef');
+    expect(field.value).not.toBe('');
+    window.dispatchEvent(new Event('blur'));
+    await settle(fixture);
+    expect(field.value).toBe('');
+  });
+
+  it('wipes the typed key when the component is destroyed and never writes it to browser storage', async () => {
+    const { fixture, field } = await openForm();
+    typeInto(field, 'sk-test-0123456789abcdef');
+    fixture.destroy();
+    expect(field.value).toBe('');
+    expect(JSON.stringify({ ...localStorage })).not.toContain('sk-test');
+    expect(JSON.stringify({ ...sessionStorage })).not.toContain('sk-test');
+  });
+
+  it('wipes the key and keeps the dialog closed state after cancelling', async () => {
+    const { fixture, el, field } = await openForm();
+    typeInto(field, 'sk-test-0123456789abcdef');
+    button(el, 'Cancel')!.click();
+    await settle(fixture);
+    expect(field.value).toBe('');
   });
 });
 

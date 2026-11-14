@@ -5,6 +5,9 @@
 #   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile app up -d --build
 #       → same stack + the Core API container
 #
+#   docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env --profile orchestrator up -d --build
+#       → same stack + the AI orchestrator (http://127.0.0.1:8091, internal, token-protected)
+#
 # Credentials come from infra/docker/.env (never committed, see .env.example and
 # infra/docker/scripts/ensure-env.sh).
 name: ai-workforce
@@ -56,6 +59,10 @@ services:
       KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME:-keycloak}
       KEYCLOAK_DB_USERNAME: ${KEYCLOAK_DB_USERNAME:?KEYCLOAK_DB_USERNAME is required}
       KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD is required}
+      # Optional until `ensure-env.sh` has added them: without them the orchestrator database is skipped.
+      ORCHESTRATOR_DB_NAME: ${ORCHESTRATOR_DB_NAME:-}
+      ORCHESTRATOR_DB_USERNAME: ${ORCHESTRATOR_DB_USERNAME:-}
+      ORCHESTRATOR_DB_PASSWORD: ${ORCHESTRATOR_DB_PASSWORD:-}
     volumes:
       - ./postgres/init-roles.sh:/scripts/init-roles.sh:ro
 
@@ -130,9 +137,51 @@ services:
       SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:?SECRETS_MASTER_KEY is required (bash infra/docker/scripts/ensure-env.sh)}
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
+      # Core API -> orchestrator (its own Keycloak service account; blank secret = dispatching disabled).
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_DOCKER_URL:-http://ai-orchestrator:8091}
+      ORCHESTRATOR_TOKEN_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/token
+      CORE_API_SERVICE_CLIENT_SECRET: ${CORE_API_SERVICE_CLIENT_SECRET:-}
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:4200}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+
+  ai-orchestrator:
+    # Opt-in: `--profile orchestrator`. Internal service: published on the loopback interface only,
+    # every endpoint except /health/* needs a Keycloak service-account token.
+    profiles: ["orchestrator"]
+    build:
+      context: ../../services/ai-orchestrator
+    image: ai-workforce/ai-orchestrator:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    environment:
+      AIO_ENVIRONMENT: ${ORCHESTRATOR_ENVIRONMENT:-dev}
+      # Service identity (OAuth2 client credentials): provision it with infra/keycloak/scripts/provision-orchestrator-client.sh
+      AIO_CLIENT_ID: ai-orchestrator
+      AIO_CLIENT_SECRET: ${ORCHESTRATOR_CLIENT_SECRET:?ORCHESTRATOR_CLIENT_SECRET is required (bash infra/docker/scripts/ensure-env.sh)}
+      AIO_TOKEN_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/token
+      AIO_OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8082/realms/ai-workforce}
+      AIO_OIDC_JWKS_URL: http://keycloak:8080/realms/ai-workforce/protocol/openid-connect/certs
+      AIO_CORE_API_BASE_URL: ${ORCHESTRATOR_CORE_API_URL:-http://core-api:8080}
+      AIO_ALLOWED_CALLER_CLIENT_IDS: ai-workforce-core-api
+      # Dedicated database and restricted role: no access to the Core API or Keycloak databases.
+      AIO_DATABASE_URL: postgresql://${ORCHESTRATOR_DB_USERNAME:?ORCHESTRATOR_DB_USERNAME is required}:${ORCHESTRATOR_DB_PASSWORD:?ORCHESTRATOR_DB_PASSWORD is required}@postgres:5432/${ORCHESTRATOR_DB_NAME:?ORCHESTRATOR_DB_NAME is required}
+    ports:
+      - "127.0.0.1:${ORCHESTRATOR_PORT:-8091}:8091"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/health/live', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
 
 volumes:
   postgres-data:

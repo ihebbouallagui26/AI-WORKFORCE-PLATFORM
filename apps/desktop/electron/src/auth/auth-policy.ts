@@ -237,6 +237,12 @@ const ALLOWED_ROUTES: ReadonlyArray<{ readonly method: ApiMethod; readonly patte
   ['PUT', `${ORG}/agents/${UUID}/skills`],
   ['GET', `${ORG}/agents/${UUID}/tools`],
   ['PUT', `${ORG}/agents/${UUID}/tools`],
+  // Supervised executions (Sprint C1): launch, list and read. Never the /internal/** service endpoints, never a
+  // credential: the renderer cannot choose what runs beyond an instruction for an agent it may execute.
+  ['POST', `${ORG}/agents/${UUID}/executions`],
+  ['GET', `${ORG}/agents/${UUID}/executions`],
+  ['GET', `${ORG}/executions`],
+  ['GET', `${ORG}/executions/${UUID}`],
   ['GET', `${ORG}/agents/${UUID}/memory-config`],
   ['PUT', `${ORG}/agents/${UUID}/memory-config`],
   ['GET', `${ORG}/skills`],
@@ -270,6 +276,8 @@ const ALLOWED_QUERY: Readonly<Record<string, RegExp>> = {
   type: /^[A-Z_]{1,20}$/,
   active: BOOLEAN_VALUE,
   category: /^[A-Za-z0-9 &/_.-]{1,40}$/,
+  // Executions (Sprint C1).
+  agentId: UUID_VALUE,
 };
 
 export const MAX_BODY_BYTES = 64 * 1024;

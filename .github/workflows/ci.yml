@@ -75,6 +75,29 @@ jobs:
       - name: Angular production build
         run: npm --prefix apps/desktop/ui run build
 
+  orchestrator:
+    name: AI Orchestrator (Python + PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/ai-orchestrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install (locked, pinned)
+        run: |
+          pip install uv==0.13.8
+          uv sync --frozen
+      - name: Lint
+        run: uv run ruff check .
+      # Mocked providers, Testcontainers PostgreSQL and a local stdio MCP server: no real API key is used.
+      # Live provider smoke tests are skipped unless AIO_LIVE_PROVIDER_TESTS=1 (never set in CI).
+      - name: Tests
+        run: uv run pytest -q
+
   security:
     name: Security checks
     runs-on: ubuntu-24.04

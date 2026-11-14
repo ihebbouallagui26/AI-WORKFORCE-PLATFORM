@@ -32,6 +32,17 @@ docker compose -f infra/docker/compose.yaml --env-file infra/docker/.env up -d -
 | Accounts | registration on, e-mail as username, e-mail verification, brute-force detection, password policy (12+ chars, not username/e-mail) |
 | SMTP | `mailpit:1025` |
 
+## Orchestrator service account (Phase C0)
+
+The AI orchestrator authenticates to the Core API as the confidential client `ai-orchestrator` (service account, client credentials only: no browser flow, no password grant, no implicit; access token 5 min; its tokens carry the `ai-workforce-api` audience). It is **not** in the realm file (that file must contain no secret and is imported only once): install it, on a fresh or existing realm, with
+
+```bash
+bash infra/docker/scripts/ensure-env.sh                              # generates ORCHESTRATOR_CLIENT_SECRET
+bash infra/keycloak/scripts/provision-orchestrator-client.sh         # idempotent; the secret is never printed
+```
+
+A second client, `ai-workforce-core-api` (secret `CORE_API_SERVICE_CLIENT_SECRET`, token audience `ai-orchestrator`), is the identity of the Core API when it asks the orchestrator to run an execution (Phase C1); the same script provisions both, one per direction. The Core API accepts the orchestrator client's tokens only on `/api/v1/internal/**` (`app.orchestrator.client-id` / `ORCHESTRATOR_CLIENT_ID`) and refuses them elsewhere. In production create the client through your normal change process and store the secret in a secret manager.
+
 ## Create a user
 
 Either register from the sign-in page (then open the verification e-mail in Mailpit), or in the admin console: *Users → Add user*, set e-mail, tick *Email verified*, then *Credentials → Set password* (not temporary).
