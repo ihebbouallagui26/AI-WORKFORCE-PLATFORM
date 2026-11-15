@@ -71,3 +71,11 @@ tool call id, never retried here), and relays the Core API decision to the model
 ends as soon as one is accepted; a rejection is relayed so the model may choose again, bounded by the round limit and by the Core API.
 There is no long-lived supervisor and no workflow state in checkpoints. Tests (`tests/test_workflow_actions.py`) use a scripted provider
 adapter and a stubbed Core API; real Anthropic tool-use for this flow is **NOT VERIFIED**.
+
+## Workflow reliability (Sprint C3.3)
+
+The orchestrator never decides a retry. It reports every failure with a precise safe code (`PROVIDER_UNAVAILABLE`, `PROVIDER_RATE_LIMIT`, `PROVIDER_TIMEOUT`,
+`PROVIDER_AUTHENTICATION`, `TOOL_FAILED`, `DEADLINE_EXCEEDED`, `COORDINATION_UNAVAILABLE`, …); the Core API classifies it, decides on a retry and creates a NEW execution.
+When an execution belongs to a workflow, the `start` answer carries `deadlineSeconds` (the earlier of the step and workflow deadlines): the run is bounded by it and fails with
+`DEADLINE_EXCEEDED` instead of extending it; a tool call cut short has an UNKNOWN outcome, recorded by the Core API, and is never replayed here. Failure messages come from a
+fixed table: no task, credential or provider text. Tests: `tests/test_workflow_reliability.py` (scripted adapters, stubbed Core API; real Anthropic behaviour NOT VERIFIED).

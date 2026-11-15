@@ -71,6 +71,25 @@ public class WorkflowStep {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Column(name = "launch_reason", nullable = false, updatable = false)
+    private String launchReason = "INITIAL";
+
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "failure_category")
+    private FailureCategory failureCategory;
+
+    @Column(name = "retry_safe")
+    private Boolean retrySafe;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
+    @Column(name = "deadline_at", updatable = false)
+    private Instant deadlineAt;
+
+    @Column(name = "retry_requested_by")
+    private UUID retryRequestedBy;
+
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
@@ -101,6 +120,25 @@ public class WorkflowStep {
         this.inputRanks = inputRanks;
         this.createdAt = now;
         this.startedAt = now;
+        this.updatedAt = now;
+    }
+
+    /** How this attempt was launched and when it must end (null = only the workflow deadline applies). */
+    void launchedAs(String reason, Instant stepDeadline) {
+        this.launchReason = reason;
+        this.deadlineAt = stepDeadline;
+    }
+
+    /** Records the classification of a failed attempt (Core API decision data; never a model output). */
+    void classified(WorkflowFailureClassifier.Failure failure) {
+        this.failureCategory = failure.category();
+        this.retrySafe = failure.retrySafe();
+    }
+
+    /** The next attempt of this rank is due at {@code at} (durable: it survives a restart). */
+    void retryDueAt(Instant at, UUID requestedBy, Instant now) {
+        this.nextAttemptAt = at;
+        this.retryRequestedBy = requestedBy;
         this.updatedAt = now;
     }
 
@@ -143,6 +181,12 @@ public class WorkflowStep {
 
     public UUID getId() { return id; }
     public UUID getOrganizationId() { return organizationId; }
+    public String getLaunchReason() { return launchReason; }
+    public FailureCategory getFailureCategory() { return failureCategory; }
+    public Boolean getRetrySafe() { return retrySafe; }
+    public Instant getNextAttemptAt() { return nextAttemptAt; }
+    public Instant getDeadlineAt() { return deadlineAt; }
+    public UUID getRetryRequestedBy() { return retryRequestedBy; }
     public UUID getRunId() { return runId; }
     public int getStepRank() { return stepRank; }
     public int getAttempt() { return attempt; }

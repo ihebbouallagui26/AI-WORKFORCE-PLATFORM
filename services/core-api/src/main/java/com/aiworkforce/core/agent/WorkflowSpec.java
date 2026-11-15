@@ -33,7 +33,17 @@ final class WorkflowSpec {
     /** Everything a run needs, frozen when it starts. */
     record Snapshot(UUID definitionId, int version, String name, List<Step> steps, List<UUID> participants, int maxSteps,
             int maxRetriesPerStep, int tokenBudget, int deadlineSeconds, String mode, UUID coordinatorAgentId,
-            List<Member> members) {
+            List<Member> members, String failurePolicy, String recoveryMode, Integer stepTimeoutSeconds) {
+
+        /** Snapshots written before C3.3 carry no policy: they are FAIL_FAST with no manual recovery and no step timeout. */
+        WorkflowFailurePolicy policy() {
+            return failurePolicy == null ? WorkflowFailurePolicy.FAIL_FAST : WorkflowFailurePolicy.valueOf(failurePolicy);
+        }
+
+        boolean manualRecovery() {
+            return WorkflowRecoveryMode.MANUAL.name().equals(recoveryMode);
+        }
+
 
         /** Snapshots written by C3.1 carry no mode: they are pipelines. */
         boolean coordinated() {

@@ -45,6 +45,12 @@ interface ToolInvocationRepository extends JpaRepository<ToolInvocation, UUID> {
     boolean existsStartedByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
             @Param("executionId") UUID executionId);
 
+    /** True when a call of this execution ended OUTCOME_UNKNOWN: an external effect may exist and must never be replayed. */
+    @Query("select count(i) > 0 from ToolInvocation i where i.organizationId = :organizationId "
+            + "and i.executionId = :executionId and i.errorCode = 'OUTCOME_UNKNOWN'")
+    boolean existsOutcomeUnknownByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
+            @Param("executionId") UUID executionId);
+
     /** True while a call of this execution is RUNNING (its outcome is not known yet). */
     @Query("select count(i) > 0 from ToolInvocation i where i.organizationId = :organizationId "
             + "and i.executionId = :executionId and i.status = com.aiworkforce.core.agent.InvocationStatus.RUNNING")

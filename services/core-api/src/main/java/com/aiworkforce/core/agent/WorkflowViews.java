@@ -26,7 +26,8 @@ public final class WorkflowViews {
     @Schema(name = "WorkflowDefinition")
     public record DefinitionView(UUID id, UUID organizationId, String name, String description, WorkflowDefinitionStatus status,
             WorkflowMode mode, UUID coordinatorAgentId, int version, List<ParticipantView> participants, List<StepDefinitionView> steps, int maxSteps,
-            int maxRetriesPerStep, int tokenBudget, int deadlineSeconds, UUID createdBy, Instant createdAt,
+            int maxRetriesPerStep, int tokenBudget, int deadlineSeconds, WorkflowFailurePolicy failurePolicy,
+            WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds, UUID createdBy, Instant createdAt,
             Instant updatedAt, Instant archivedAt) {
 
         static DefinitionView of(WorkflowDefinition d, List<WorkflowParticipant> participants, Map<UUID, Agent> agents) {
@@ -40,7 +41,7 @@ public final class WorkflowViews {
                     .map(s -> new StepDefinitionView(s.rank(), s.name(), s.agentId(), s.instruction(), s.inputsFrom())).toList();
             return new DefinitionView(d.getId(), d.getOrganizationId(), d.getName(), d.getDescription(), d.getStatus(), d.getMode(),
                     d.getCoordinatorAgentId(), d.getVersion(), people, stepViews, d.getMaxSteps(), d.getMaxRetriesPerStep(), d.getTokenBudget(), d.getDeadlineSeconds(),
-                    d.getCreatedBy(), d.getCreatedAt(), d.getUpdatedAt(), d.getArchivedAt());
+                    d.getFailurePolicy(), d.getRecoveryMode(), d.getStepTimeoutSeconds(), d.getCreatedBy(), d.getCreatedAt(), d.getUpdatedAt(), d.getArchivedAt());
         }
     }
 
@@ -61,12 +62,14 @@ public final class WorkflowViews {
     @Schema(name = "WorkflowStep")
     public record StepView(UUID id, UUID runId, int rank, int attempt, String name, UUID agentId, String agentName, String role,
             UUID executionId, WorkflowStepStatus status, String inputsFrom, String resultSummary, String errorCode,
-            String errorMessage, Instant createdAt, Instant startedAt, Instant completedAt) {
+            String errorMessage, Instant createdAt, Instant startedAt, Instant completedAt, String launchReason,
+            FailureCategory failureCategory, Boolean retrySafe, Instant nextAttemptAt, Instant deadlineAt) {
 
         static StepView of(WorkflowStep s, String agentName) {
             return new StepView(s.getId(), s.getRunId(), s.getStepRank(), s.getAttempt(), s.getName(), s.getAgentId(), agentName,
                     s.getRole(), s.getExecutionId(), s.getStatus(), s.getInputRanks(), s.getResultSummary(), s.getErrorCode(),
-                    s.getErrorMessage(), s.getCreatedAt(), s.getStartedAt(), s.getCompletedAt());
+                    s.getErrorMessage(), s.getCreatedAt(), s.getStartedAt(), s.getCompletedAt(), s.getLaunchReason(),
+                    s.getFailureCategory(), s.getRetrySafe(), s.getNextAttemptAt(), s.getDeadlineAt());
         }
     }
 
@@ -76,6 +79,20 @@ public final class WorkflowViews {
         static MessageView of(WorkflowMessage m) {
             return new MessageView(m.getId(), m.getSequence(), m.getStepRank(), m.getKind(), m.getBody(), m.getCreatedAt());
         }
+    }
+
+    @Schema(name = "WorkflowAttemptUsage")
+    public record AttemptUsageView(int rank, int attempt, String role, String launchReason, WorkflowStepStatus status, String errorCode,
+            FailureCategory failureCategory, Boolean retrySafe, UUID executionId, Long durationMs, long inputTokens, long outputTokens) {
+    }
+
+    /** Operational view of one run: durations, attempts, failures, tokens (not money: no reliable price data) and recovery state. */
+    @Schema(name = "WorkflowRunSummary")
+    public record RunSummaryView(UUID runId, WorkflowMode mode, WorkflowRunStatus status, WorkflowFailurePolicy failurePolicy,
+            Instant createdAt, Instant startedAt, Instant completedAt, Instant deadlineAt, Long durationMs, int attempts,
+            int automaticRetries, int manualRetries, int failedAttempts, Map<String, Integer> failuresByCategory,
+            long inputTokens, long outputTokens, long coordinatorTokens, long workerTokens, int tokenBudget, long tokensRemaining,
+            Instant nextRetryAt, boolean waitingRecovery, String errorCode, List<AttemptUsageView> attemptList) {
     }
 
     @Schema(name = "WorkflowAction")

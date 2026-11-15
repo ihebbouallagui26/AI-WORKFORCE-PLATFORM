@@ -87,6 +87,19 @@ public class WorkflowRunController {
                 PageParams.of(page, size, Sort.by(Sort.Order.asc("sequence")))), Function.identity());
     }
 
+    @PostMapping("/workflow-runs/{runId}/steps/{rank}/retry")
+    @Operation(operationId = "retryWorkflowStep", summary = "Retry the failed step that holds a run in WAITING_RECOVERY (a new attempt; never an unknown outcome)")
+    public RunView retryStep(@PathVariable UUID organizationId, @PathVariable UUID runId, @PathVariable @Min(1) @Max(40) int rank,
+            AuthenticatedUser user) {
+        return runs.retryStep(organizationId, runId, rank, user);
+    }
+
+    @GetMapping("/workflow-runs/{runId}/summary")
+    @Operation(operationId = "getWorkflowRunSummary", summary = "Durations, attempts, failures by category, tokens and recovery state of a run")
+    public WorkflowViews.RunSummaryView summary(@PathVariable UUID organizationId, @PathVariable UUID runId, AuthenticatedUser user) {
+        return runs.summary(organizationId, runId, user);
+    }
+
     @GetMapping("/workflow-runs/{runId}/actions")
     @Operation(operationId = "listWorkflowRunActions", summary = "The coordinator actions of a run (delegations and finish), accepted or rejected")
     public PageResponse<WorkflowViews.ActionView> actions(@PathVariable UUID organizationId, @PathVariable UUID runId,

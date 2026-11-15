@@ -293,3 +293,23 @@ is allowed, the coordinator decides what should happen next, workers execute onl
 - Limits: ≤ 8 worker steps, depth 1, sequential; coordinator turns ≤ `maxSteps + 1`; cumulative token and time budgets include the
   coordinator; a turn without an action gets one corrective turn, then `COORDINATOR_NO_ACTION`. Approvals remain C2 approvals on the workers' tools.
 - Anthropic real connectivity is **NOT VERIFIED**; tests use a simulated provider.
+
+## Workflow reliability (Sprint C3.3)
+
+Failure handling for both modes; the Core API owns every decision (design: `docs/architecture/MULTI_AGENT_WORKFLOWS_C3_DESIGN.md` §12).
+
+- `V9__workflow_reliability.sql` (additive; V1–V8 untouched): `failure_policy`, `recovery_mode`, `step_timeout_seconds` on definitions; `failure_policy`,
+  `manual_retries` and the non-terminal status `WAITING_RECOVERY` on runs; on steps (= attempts) `launch_reason`, `failure_category`, `retry_safe`,
+  `next_attempt_at`, `deadline_at`, `retry_requested_by`.
+- Definition settings (create/update): `failurePolicy` = `FAIL_FAST` (default) | `CONTINUE` | `RETRY` (needs `maxRetriesPerStep` ≥ 1); `recoveryMode` = `NONE` |
+  `MANUAL` (not with `CONTINUE`); `stepTimeoutSeconds` (10 to the workflow deadline, 0 removes it).
+- Every failed attempt is classified (`TRANSIENT_PROVIDER_FAILURE`, `PERMANENT_PROVIDER_FAILURE`, `TOOL_FAILURE`, `OUTCOME_UNKNOWN`, `AUTHORIZATION_FAILURE`,
+  `WORKFLOW_LIMIT_EXCEEDED`, `UNCLASSIFIED`). Automatic retries: transient provider failure, no tool ever started, within `maxRetriesPerStep`, never after a manual
+  retry, never past the deadline; delay `base × 2^(n-1)` capped, with jitter, stored in PostgreSQL (`app.workflows.retry-base-delay` 5 s, `retry-max-delay` 60 s).
+  Each attempt is a new execution; previous attempts stay visible. `OUTCOME_UNKNOWN` is never replayed.
+- `POST …/workflow-runs/{runId}/steps/{rank}/retry` (`workflow.execute` + `agent.execute`): manual retry of the failed step that holds a run in `WAITING_RECOVERY`
+  (3 per run); everything is revalidated; a repeated request is a `409`.
+- `GET …/workflow-runs/{runId}/summary` (`workflow.read`): durations, attempts, retries, failures by category, input/output tokens (coordinator vs workers), remaining
+  budget, next scheduled retry. Tokens are not money.
+- Internal `start` answers carry `deadlineSeconds` for executions that belong to a workflow.
+- Limits: no reconciliation of unknown outcomes, no exactly-once guarantee for external effects, tool failures are never replayed.

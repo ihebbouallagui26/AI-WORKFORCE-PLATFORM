@@ -17,6 +17,7 @@ Secret and content hygiene
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -83,6 +84,7 @@ FAILURES: dict[str, str] = {
     "CORE_API_UNAVAILABLE": "The business backend is unavailable.",
     "CORE_API_REJECTED": "The business backend refused the operation.",
     "EXECUTION_TIMEOUT": "The execution did not finish in time.",
+    "DEADLINE_EXCEEDED": "The step or workflow time limit was reached before the execution finished.",
     "TOOL_ROUND_LIMIT": "The agent reached its limit of tool interactions without a final answer.",
     "RESUME_MISMATCH": "The saved execution state does not match the approval decision.",
     "STATE_UNAVAILABLE": "The saved execution state is unavailable.",
@@ -148,6 +150,8 @@ class RunContext:
     resume: ResumeInfo | None = None
     # C3.2: set only for a workflow coordinator turn (alias -> platform action). Never an MCP tool.
     platform: dict[str, PlatformAction] = field(default_factory=dict)
+    # C3.3: the time the Core API left for this execution (None = no workflow deadline); never extended here.
+    deadline_seconds: int | None = None
 
 
 class ExecutionCredentialResolver:
@@ -288,6 +292,7 @@ def build_execution_graph(
     async def start(state: ExecutionGraphState) -> dict[str, Any]:
         started = await core.start_execution(run.organization_id, run.execution_id)
         run.agent_id, run.task = started.agent_id, started.task
+        run.deadline_seconds = started.deadline_seconds
         if started.workflow_role == "COORDINATOR" and started.platform_actions:
             run.platform = {platform_alias(a.name): a for a in started.platform_actions}
         return {"stage": "start", "agent_id": str(started.agent_id), "steps": ["start"]}
@@ -318,6 +323,17 @@ def build_execution_graph(
         return {"stage": "build_prompt", "steps": ["build_prompt"]}
 
     async def invoke(state: ExecutionGraphState) -> dict[str, Any]:
+        """The model/tool run, bounded by the time the Core API left (a tool call cut short has an UNKNOWN outcome: the Core API
+        records that when it ends the execution; nothing here retries or replays it)."""
+        if run.deadline_seconds is None:
+            return await invoke_unbounded(state)
+        try:
+            async with asyncio.timeout(run.deadline_seconds):
+                return await invoke_unbounded(state)
+        except TimeoutError as exc:
+            raise ExecutionFailure("DEADLINE_EXCEEDED") from exc
+
+    async def invoke_unbounded(state: ExecutionGraphState) -> dict[str, Any]:
         assert run.binding is not None
         resolver = ExecutionCredentialResolver(core, run.organization_id, run.execution_id)
         if run.loop is not None and (tools is not None or run.platform):

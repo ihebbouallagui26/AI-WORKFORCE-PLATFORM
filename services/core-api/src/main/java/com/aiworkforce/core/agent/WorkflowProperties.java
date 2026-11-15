@@ -12,16 +12,20 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param cancelGrace                how long a cancelled run waits for a RUNNING tool call to reach a known outcome
  *                                   before its child execution is ended (the call is then OUTCOME_UNKNOWN)
  * @param maxResultChars             results kept on a run are truncated to this length
+ * @param retryBaseDelay             delay before the first automatic retry; it doubles per attempt (with jitter)
+ * @param retryMaxDelay              upper bound of any retry delay
  */
 @ConfigurationProperties(prefix = "app.workflows")
 public record WorkflowProperties(Integer maxOpenRunsPerOrganization, Long maintenanceMs, Duration cancelGrace,
-        Integer maxResultChars) {
+        Integer maxResultChars, Duration retryBaseDelay, Duration retryMaxDelay) {
 
     public WorkflowProperties {
         maxOpenRunsPerOrganization = maxOpenRunsPerOrganization == null ? 3 : maxOpenRunsPerOrganization;
         maintenanceMs = maintenanceMs == null ? 3000L : maintenanceMs;
         cancelGrace = cancelGrace == null ? Duration.ofSeconds(30) : cancelGrace;
         maxResultChars = maxResultChars == null ? 20000 : maxResultChars;
+        retryBaseDelay = retryBaseDelay == null ? Duration.ofSeconds(5) : retryBaseDelay;
+        retryMaxDelay = retryMaxDelay == null ? Duration.ofSeconds(60) : retryMaxDelay;
         if (maxOpenRunsPerOrganization < 1 || maxOpenRunsPerOrganization > 50) {
             throw new IllegalArgumentException("app.workflows.max-open-runs-per-organization must be between 1 and 50");
         }

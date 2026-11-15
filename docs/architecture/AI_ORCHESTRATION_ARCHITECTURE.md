@@ -153,3 +153,9 @@ platform actions, forwarding each through `CoreApiClient.submit_workflow_action`
 Everything that matters is decided and persisted by the Core API (`workflow_actions`); the orchestrator is stateless between turns, keeps nothing
 about the workflow in its checkpoints, and a coordinator turn never pauses for an approval. Failure codes added: `COORDINATION_UNAVAILABLE`
 (Core API unreachable while forwarding an action; not retried here) and `COORDINATION_REJECTED` (the Core API refused the call itself).
+
+## 11. Workflow reliability (Phase C3.3)
+
+Retry, backoff, failure policies and manual recovery live entirely in the Core API (`WorkflowScheduler`, PostgreSQL). The orchestrator contributes two things: precise,
+safe failure codes (including `DEADLINE_EXCEEDED`) and respect for the `deadlineSeconds` the Core API returns at `start` (`asyncio.timeout` around the model/tool run).
+It never retries a provider call, a tool call or a platform action by itself, and no workflow, attempt or retry state is placed in checkpoints.

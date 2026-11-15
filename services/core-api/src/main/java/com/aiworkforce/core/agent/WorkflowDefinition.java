@@ -50,6 +50,17 @@ public class WorkflowDefinition {
     @Column(name = "coordinator_agent_id")
     private UUID coordinatorAgentId;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "failure_policy", nullable = false)
+    private WorkflowFailurePolicy failurePolicy = WorkflowFailurePolicy.FAIL_FAST;
+
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "recovery_mode", nullable = false)
+    private WorkflowRecoveryMode recoveryMode = WorkflowRecoveryMode.NONE;
+
+    @Column(name = "step_timeout_seconds")
+    private Integer stepTimeoutSeconds;
+
     @Column(name = "max_steps", nullable = false)
     private int maxSteps;
 
@@ -130,6 +141,21 @@ public class WorkflowDefinition {
         bump(now);
     }
 
+    /** Failure handling (C3.3). A null argument leaves the value unchanged; stepTimeoutSeconds 0 removes the timeout. */
+    void configureReliability(WorkflowFailurePolicy policy, WorkflowRecoveryMode recovery, Integer stepTimeout, Instant now) {
+        requireActive();
+        if (policy != null) {
+            this.failurePolicy = policy;
+        }
+        if (recovery != null) {
+            this.recoveryMode = recovery;
+        }
+        if (stepTimeout != null) {
+            this.stepTimeoutSeconds = stepTimeout == 0 ? null : stepTimeout;
+        }
+        bump(now);
+    }
+
     /** Chooses the coordinator of a COORDINATED workflow (null is only valid for a PIPELINE). */
     void changeCoordinator(UUID agentId, Instant now) {
         requireActive();
@@ -169,6 +195,9 @@ public class WorkflowDefinition {
     public int getVersion() { return version; }
     public WorkflowMode getMode() { return mode; }
     public UUID getCoordinatorAgentId() { return coordinatorAgentId; }
+    public WorkflowFailurePolicy getFailurePolicy() { return failurePolicy; }
+    public WorkflowRecoveryMode getRecoveryMode() { return recoveryMode; }
+    public Integer getStepTimeoutSeconds() { return stepTimeoutSeconds; }
     public String getSteps() { return steps; }
     public int getMaxSteps() { return maxSteps; }
     public int getMaxRetriesPerStep() { return maxRetriesPerStep; }

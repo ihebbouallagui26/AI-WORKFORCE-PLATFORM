@@ -57,7 +57,8 @@ public class WorkflowDefinitionService {
 
     @Transactional
     public DefinitionView create(UUID organizationId, AuthenticatedUser user, String name, String description, Integer maxSteps,
-            Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds, WorkflowMode mode) {
+            Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds, WorkflowMode mode,
+            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = new WorkflowDefinition(UUID.randomUUID(), organizationId, cleanName(name),
                 description == null ? "" : description.strip(), limit(maxSteps, 8, 1, WorkflowSpec.MAX_STEPS, "maxSteps"),
@@ -65,6 +66,8 @@ public class WorkflowDefinitionService {
                 limit(tokenBudget, DEFAULT_TOKEN_BUDGET, 1000, 10_000_000, "tokenBudget"),
                 limit(deadlineSeconds, DEFAULT_DEADLINE_SECONDS, 30, 86_400, "deadlineSeconds"), user.userId(),
                 mode == null ? WorkflowMode.PIPELINE : mode, Instant.now(clock));
+        definition.configureReliability(failurePolicy, recoveryMode, stepTimeoutSeconds, Instant.now(clock));
+        checkReliability(definition);
         definitions.save(definition);
         audit.record(organizationId, user.userId(), "workflow.created", "workflow", definition.getId(),
                 AgentSupport.details("name", definition.getName()));
@@ -85,7 +88,8 @@ public class WorkflowDefinitionService {
 
     @Transactional
     public DefinitionView update(UUID organizationId, UUID id, AuthenticatedUser user, String name, String description,
-            Integer maxSteps, Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds) {
+            Integer maxSteps, Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds,
+            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = lock(organizationId, id);
         if (maxSteps != null && WorkflowSpec.parseSteps(definition.getSteps()).size() > limit(maxSteps, 8, 1, WorkflowSpec.MAX_STEPS, "maxSteps")) {
@@ -97,6 +101,10 @@ public class WorkflowDefinitionService {
                 tokenBudget == null ? null : limit(tokenBudget, DEFAULT_TOKEN_BUDGET, 1000, 10_000_000, "tokenBudget"),
                 deadlineSeconds == null ? null : limit(deadlineSeconds, DEFAULT_DEADLINE_SECONDS, 30, 86_400, "deadlineSeconds"),
                 Instant.now(clock));
+        if (failurePolicy != null || recoveryMode != null || stepTimeoutSeconds != null) {
+            definition.configureReliability(failurePolicy, recoveryMode, stepTimeoutSeconds, Instant.now(clock));
+        }
+        checkReliability(definition);
         audit.record(organizationId, user.userId(), "workflow.updated", "workflow", id, AgentSupport.details("version", definition.getVersion()));
         return view(organizationId, definition);
     }
@@ -198,6 +206,20 @@ public class WorkflowDefinitionService {
         agents.findByOrganizationIdAndIdIn(organizationId, people.stream().map(WorkflowParticipant::getAgentId).toList())
                 .forEach(a -> byId.put(a.getId(), a));
         return DefinitionView.of(definition, people, byId);
+    }
+
+    /** RETRY needs retries to retry with; a manual recovery makes no sense when failures are continued past. */
+    private static void checkReliability(WorkflowDefinition d) {
+        if (d.getFailurePolicy() == WorkflowFailurePolicy.RETRY && d.getMaxRetriesPerStep() < 1) {
+            throw new BadRequestException("The RETRY policy needs maxRetriesPerStep of at least 1.");
+        }
+        if (d.getRecoveryMode() == WorkflowRecoveryMode.MANUAL && d.getFailurePolicy() == WorkflowFailurePolicy.CONTINUE) {
+            throw new BadRequestException("Manual recovery cannot be combined with the CONTINUE policy.");
+        }
+        if (d.getStepTimeoutSeconds() != null && (d.getStepTimeoutSeconds() < 10 || d.getStepTimeoutSeconds() > 86_400
+                || d.getStepTimeoutSeconds() > d.getDeadlineSeconds())) {
+            throw new BadRequestException("stepTimeoutSeconds must be between 10 and the workflow deadline.");
+        }
     }
 
     private static String cleanName(String name) {

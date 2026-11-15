@@ -37,14 +37,16 @@ interface WorkflowRunRepository extends JpaRepository<WorkflowRun, UUID> {
             select count(r) from WorkflowRun r
             where r.organizationId = :organizationId and r.status in (
                 com.aiworkforce.core.agent.WorkflowRunStatus.PENDING, com.aiworkforce.core.agent.WorkflowRunStatus.RUNNING,
-                com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_APPROVAL, com.aiworkforce.core.agent.WorkflowRunStatus.CANCEL_REQUESTED)""")
+                com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_APPROVAL, com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_RECOVERY,
+                com.aiworkforce.core.agent.WorkflowRunStatus.CANCEL_REQUESTED)""")
     long countOpenByOrganization(@Param("organizationId") UUID organizationId);
 
     /** Runs that still need the scheduler, across organizations (system maintenance only). */
     @Query("""
             select r from WorkflowRun r where r.status in (
                 com.aiworkforce.core.agent.WorkflowRunStatus.PENDING, com.aiworkforce.core.agent.WorkflowRunStatus.RUNNING,
-                com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_APPROVAL, com.aiworkforce.core.agent.WorkflowRunStatus.CANCEL_REQUESTED)
+                com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_APPROVAL, com.aiworkforce.core.agent.WorkflowRunStatus.WAITING_RECOVERY,
+                com.aiworkforce.core.agent.WorkflowRunStatus.CANCEL_REQUESTED)
             order by r.updatedAt""")
     List<WorkflowRun> findOpenOrganizationWide(Pageable limit);
 }

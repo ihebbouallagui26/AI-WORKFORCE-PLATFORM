@@ -71,6 +71,24 @@ public class WorkflowActionService {
                 .map(s -> WorkflowScheduler.COORDINATOR.equals(s.getRole())).orElse(false);
     }
 
+    /**
+     * Seconds left for this execution when it belongs to a workflow: the earlier of its step deadline and the workflow deadline
+     * (null for an ordinary execution). The orchestrator must not run past it; the Core API still ends the child itself.
+     */
+    @Transactional(readOnly = true)
+    public Long remainingSeconds(UUID organizationId, UUID executionId) {
+        WorkflowStep step = steps.findByOrganizationIdAndExecutionId(organizationId, executionId).orElse(null);
+        if (step == null) {
+            return null;
+        }
+        WorkflowRun run = runs.findByOrganizationIdAndId(organizationId, step.getRunId()).orElse(null);
+        if (run == null) {
+            return null;
+        }
+        Instant deadline = step.getDeadlineAt() != null && step.getDeadlineAt().isBefore(run.getDeadlineAt()) ? step.getDeadlineAt() : run.getDeadlineAt();
+        return Math.max(1L, java.time.Duration.between(Instant.now(clock), deadline).getSeconds());
+    }
+
     @Transactional(noRollbackFor = {ConflictException.class})
     public ActionResult submit(UUID organizationId, UUID executionId, String toolCallId, String actionName, JsonNode arguments) {
         if (toolCallId == null || !CALL_ID.matcher(toolCallId).matches()) {

@@ -216,3 +216,72 @@ tâches pour lesquelles ils sont explicitement autorisés.** Le mode `PIPELINE` 
 * **Connectivité Anthropic réelle : NON VÉRIFIÉE.** Les tests utilisent un adaptateur fournisseur simulé ; le comportement réel d'un modèle face aux deux actions n'est pas démontré.
 * Un échec de l'appel `workflow-actions` (Core API injoignable) fait échouer le tour (`COORDINATION_UNAVAILABLE`) : l'appel n'est jamais rejoué automatiquement par l'orchestrateur.
 * Séquentiel uniquement ; parallélisme, messages worker↔worker, délégation récursive, mémoire partagée, OpenAI/Gemini en tool-use, interface : différés.
+
+## 12. Réalité de C3.3 (implémenté, vérifié) — fiabilité, reprise et gestion des échecs
+
+Principe : **le Core API possède les décisions de reprise ; LangGraph exécute des tours approuvés ; une action externe au résultat inconnu n'est
+jamais rejouée à l'aveugle.** Aucun second automate d'état n'a été introduit : l'état reste dans PostgreSQL, le planificateur (C3.1) et ses passes
+idempotentes restent le moteur **et** le mécanisme de reprise. Une ligne `workflow_steps` est déjà une *tentative* (unique `(run, rang, tentative)`) :
+aucune table de tentatives n'a été ajoutée.
+
+### Taxonomie des échecs (`FailureCategory`, `WorkflowFailureClassifier`)
+| Catégorie | Exemples de codes | Retry automatique | Reprise manuelle |
+|---|---|---|---|
+| `TRANSIENT_PROVIDER_FAILURE` | `PROVIDER_TIMEOUT/UNAVAILABLE/RATE_LIMIT`, `ORCHESTRATOR_UNAVAILABLE`, `TIMEOUT` (reaper) | oui, borné, **si aucun outil n'a démarré** | oui (même condition) |
+| `PERMANENT_PROVIDER_FAILURE` | `PROVIDER_AUTHENTICATION`, `PROVIDER_BAD_REQUEST`, `PROVIDER_NOT_CONFIGURED`, `CREDENTIAL_UNAVAILABLE` | jamais | oui, après correction par une personne (aucun outil démarré) |
+| `TOOL_FAILURE` | `TOOL_FAILED`, `TOOL_ROUND_LIMIT` | jamais (aucune garantie d'idempotence de l'outil) | non |
+| `OUTCOME_UNKNOWN` | un appel d'outil `RUNNING` quand l'exécution se termine, ou clos `OUTCOME_UNKNOWN` | **jamais** | **non** (pas de mécanisme de réconciliation) |
+| `AUTHORIZATION_FAILURE` | `AGENT_NOT_ELIGIBLE`, `REQUESTER_NOT_AUTHORIZED`, `STEP_NOT_RUNNABLE` | jamais | non |
+| `WORKFLOW_LIMIT_EXCEEDED` | `WORKFLOW_TIMEOUT`, `STEP_TIMEOUT`, `DEADLINE_EXCEEDED`, `TOKEN_BUDGET_EXCEEDED`, annulation | jamais | non |
+| `UNCLASSIFIED` | tout code inconnu | jamais | non |
+
+La catégorie et `retrySafe` (« aucun appel d'outil n'a jamais démarré ») sont calculés **une fois**, à la clôture de la tentative, et stockés sur la
+tentative. Un état `OUTCOME_UNKNOWN` l'emporte sur tout code d'erreur (une erreur « transitoire » après le début d'un appel d'outil reste inconnue).
+Choix assumé : une génération de texte fournisseur sans outil n'a pas d'effet externe autre que la consommation de jetons (comptée) ; elle peut donc
+être rejouée.
+
+### Politiques d'échec (par définition, figées dans le snapshot)
+* `FAIL_FAST` (défaut) : aucune étape ne démarre après l'échec ; les résultats précédents sont conservés ; le run devient `FAILED` (`STEP_FAILED`).
+* `CONTINUE` : l'échec est conservé et **jamais présenté comme un succès**. PIPELINE : l'étape suivante continue ; si elle a déclaré le rang échoué dans
+  `inputsFrom`, elle reçoit `[This step FAILED (<catégorie>). No result is available.]` (donnée, pas résultat) ; à la fin, un run avec au moins un rang
+  sans tentative réussie est `FAILED` avec le code `PARTIAL_FAILURE` (les résultats réussis sont conservés). COORDINATED : le coordinateur reçoit au tour
+  suivant un résumé borné (`FAILED (<catégorie>, nothing external happened | an external effect may have happened)`) et décide (autre worker, autre
+  tâche, `finish`) ; une tâche identique au même worker reste refusée (anti-doublon). `CONTINUE` ne passe jamais outre une autorisation révoquée ni une limite
+  du workflow, et un tour **coordinateur** échoué ne continue jamais.
+* `RETRY` : retries automatiques bornés (`maxRetriesPerStep` ≥ 1 obligatoire) puis `FAIL_FAST`. (Les retries automatiques de C3.1 restent actifs pour toute
+  politique dont `maxRetriesPerStep` > 0.)
+* `recoveryMode: MANUAL` (avec `FAIL_FAST`/`RETRY` uniquement, contrainte en base) : un échec **connu et sans effet externe** (`manuallyRecoverable`) place le run en
+  `WAITING_RECOVERY` (statut non terminal, échéance toujours active) au lieu de `FAILED`.
+
+### Retry automatique, backoff, durabilité
+Décidé à la clôture de la tentative (`scheduleAutomaticRetry`) : catégorie transitoire **et** `retrySafe`, tentative ≤ `maxRetriesPerStep`, jamais après une tentative
+manuelle, jamais si le run est `CANCEL_REQUESTED`, jamais si l'échéance serait dépassée. Délai = `base × 2^(n-1)` plafonné (`app.workflows.retry-base-delay` 5 s,
+`retry-max-delay` 60 s) avec gigue ±20 %, **stocké** dans `workflow_steps.next_attempt_at` : un redémarrage (Core API ou worker) ne perd rien, la passe suivante le
+lit. Chaque tentative est une **nouvelle exécution C1** ; l'ancienne et son résultat sont conservés ; les jetons de toutes les tentatives comptent dans le budget cumulé.
+
+### Reprise manuelle
+`POST /workflow-runs/{runId}/steps/{rank}/retry` (`workflow.execute` **et** `agent.execute`) : uniquement pour un run `WAITING_RECOVERY`, sur l'étape échouée qui l'a
+arrêté, si la catégorie est reprise-able, `manual_retries` < 3, échéance et budget non épuisés, l'agent est toujours participant du snapshot, `ACTIVE`, fournisseur
+valide. Puis une **nouvelle** tentative (`MANUAL_RETRY`) est lancée ; le demandeur du run est réautorisé par le planificateur (accès révoqué = run `FAILED`
+`REQUESTER_NOT_AUTHORIZED`) ; les outils restent soumis aux grants et aux approbations C2. Une requête répétée reçoit `409`. `OUTCOME_UNKNOWN` ne peut jamais être
+repris. Pas de « retry all », pas de saut d'étape.
+
+### Délais (hiérarchie)
+Fournisseur/outil MCP (C1/C2, inchangés) → **exécution** (`app.executions.timeout`, reaper) → **étape** (`stepTimeoutSeconds`, `workflow_steps.deadline_at`, fin de l'enfant
+avec `STEP_TIMEOUT` ; un appel d'outil en vol devient `OUTCOME_UNKNOWN`, jamais « annulé ») → **workflow** (échéance globale : coordinateur, workers, attentes de retry et
+de récupération) ; approbation (`APPROVAL_EXPIRED`, C2). Le Core API renvoie à l'orchestrateur `deadlineSeconds` (min étape/workflow) dans la réponse `start` ; l'orchestrateur
+borne son exécution (`DEADLINE_EXCEEDED`) sans jamais l'étendre.
+
+### Observabilité
+`GET /workflow-runs/{runId}/summary` : durées, tentatives, retries automatiques/manuels, échecs par catégorie, jetons entrée/sortie, jetons coordinateur vs workers, budget
+restant, prochain retry planifié, état de reprise. Les étapes exposent `launchReason`, `failureCategory`, `retrySafe`, `nextAttemptAt`, `deadlineAt`. Les **jetons ne sont pas des
+coûts monétaires** (aucune donnée de prix fiable) ; la corrélation passe par les identifiants run/étape/tentative/exécution des audits (`workflow.step.retry-scheduled`,
+`workflow.step.retry-requested`, `workflow.step.continued`, `workflow.run.waiting-recovery`).
+
+### Lacunes de distribution (audit) et limites assumées
+* Aucun nouvel outbox : le C1 (dispatch après commit + reaper des `PENDING`) et le planificateur C3.1 couvrent déjà « événement accepté / exécution créée / démarrée / terminée »
+  (une exécution jamais reçue est échouée par le reaper en `TIMEOUT`, classée transitoire, donc rejouée si aucun outil n'a démarré). La livraison HTTP ne prouve pas l'exécution.
+* **Pas de réconciliation** des résultats inconnus : `OUTCOME_UNKNOWN` est terminal (`FAILED`) ; une réconciliation (vérifier l'effet côté système externe) reste à concevoir.
+* `TOOL_FAILURE` n'est jamais rejouable : il faudrait un contrat d'idempotence par outil, absent du registre.
+* Les tests de redémarrage utilisent un **nouveau worker sans mémoire** sur PostgreSQL réel (pas un conteneur recréé en cours de run).
+* Pas d'exactly-once pour les effets externes : au mieux « au plus une fois » pour un appel d'outil, « au moins une fois » pour la livraison des événements.

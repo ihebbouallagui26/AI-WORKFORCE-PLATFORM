@@ -98,6 +98,13 @@ public class WorkflowRun {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "failure_policy", nullable = false, updatable = false)
+    private WorkflowFailurePolicy failurePolicy = WorkflowFailurePolicy.FAIL_FAST;
+
+    @Column(name = "manual_retries", nullable = false)
+    private int manualRetries;
+
     @Version
     @Column(name = "row_version")
     private long rowVersion;
@@ -113,6 +120,7 @@ public class WorkflowRun {
         this.definitionVersion = definition.getVersion();
         this.snapshot = snapshot;
         this.mode = definition.getMode();
+        this.failurePolicy = definition.getFailurePolicy();
         this.requestedBy = requestedBy;
         this.requestId = requestId;
         this.objective = objective;
@@ -144,6 +152,17 @@ public class WorkflowRun {
         } else if (status == WorkflowRunStatus.WAITING_APPROVAL) {
             transition(WorkflowRunStatus.RUNNING, now);
         }
+    }
+
+    /** A safe, known failure holds the run until a person retries the step (or cancels it). The deadline keeps running. */
+    void waitRecovery(Instant now) {
+        transition(WorkflowRunStatus.WAITING_RECOVERY, now);
+    }
+
+    /** A person asked to retry the failed step: counted, bounded by the database. */
+    void resumeFromRecovery(Instant now) {
+        transition(WorkflowRunStatus.RUNNING, now);
+        manualRetries++;
     }
 
     void markWaitingApproval(Instant now) {
@@ -209,6 +228,8 @@ public class WorkflowRun {
     public String getObjective() { return objective; }
     public WorkflowRunStatus getStatus() { return status; }
     public int getTotalSteps() { return totalSteps; }
+    public WorkflowFailurePolicy getFailurePolicy() { return failurePolicy; }
+    public int getManualRetries() { return manualRetries; }
     public int getNextRank() { return nextRank; }
     public int getTokensUsed() { return tokensUsed; }
     public int getTokenBudget() { return tokenBudget; }
