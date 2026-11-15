@@ -16,10 +16,11 @@ public final class ToolViews {
     /** Decision of a person about an approval, as shown in the timeline. */
     @Schema(name = "ToolApprovalSummary")
     public record ApprovalSummary(UUID id, ApprovalStatus status, Instant requestedAt, Instant expiresAt, UUID decidedBy,
+            @Schema(description = "Display name of the member who decided, or a neutral fallback; null while undecided") String decidedByName,
             Instant decidedAt, String rejectionReason) {
 
-        static ApprovalSummary of(ToolApproval a) {
-            return new ApprovalSummary(a.getId(), a.getStatus(), a.getRequestedAt(), a.getExpiresAt(), a.getDecidedBy(),
+        static ApprovalSummary of(ToolApproval a, String decidedByName) {
+            return new ApprovalSummary(a.getId(), a.getStatus(), a.getRequestedAt(), a.getExpiresAt(), a.getDecidedBy(), decidedByName,
                     a.getDecidedAt(), a.getRejectionReason());
         }
     }
@@ -31,12 +32,13 @@ public final class ToolViews {
             String argumentsHash, String reason, String result, boolean resultTruncated, String errorCode,
             String errorMessage, Instant requestedAt, Instant startedAt, Instant completedAt, ApprovalSummary approval) {
 
-        static InvocationView of(ToolInvocation i, String toolName, ToolApproval approval) {
+        /** {@code result} is the DECRYPTED text (or the legacy plaintext), supplied only after authorization by the caller. */
+        static InvocationView of(ToolInvocation i, String toolName, ToolApproval approval, String decidedByName, String result) {
             return new InvocationView(i.getId(), i.getExecutionId(), i.getAgentId(), i.getToolCode(), toolName,
                     i.getToolCallId(), i.getSequence(), i.getStatus(), i.getPolicy(), i.getArgumentsRedacted(),
-                    i.getArgumentsHash(), i.getReason(), i.getResult(), i.isResultTruncated(), i.getErrorCode(),
+                    i.getArgumentsHash(), i.getReason(), result, i.isResultTruncated(), i.getErrorCode(),
                     i.getErrorMessage(), i.getRequestedAt(), i.getStartedAt(), i.getCompletedAt(),
-                    approval == null ? null : ApprovalSummary.of(approval));
+                    approval == null ? null : ApprovalSummary.of(approval, decidedByName));
         }
     }
 
@@ -48,15 +50,16 @@ public final class ToolViews {
     public record ApprovalView(UUID id, UUID executionId, ExecutionStatus executionStatus, UUID agentId, String agentName,
             UUID invocationId, String toolCode, String toolName, String mcpServer, String toolCallId, String risk,
             String description, String reason, String argumentsRedacted, String argumentsHash, int policyVersion,
-            ApprovalStatus status, Instant requestedAt, Instant expiresAt, UUID decidedBy, Instant decidedAt,
-            String rejectionReason, InvocationStatus invocationStatus) {
+            ApprovalStatus status, Instant requestedAt, Instant expiresAt, UUID decidedBy,
+            @Schema(description = "Display name of the member who decided, or a neutral fallback; null while undecided") String decidedByName,
+            Instant decidedAt, String rejectionReason, InvocationStatus invocationStatus) {
 
         static ApprovalView of(ToolApproval a, String agentName, String toolName, ExecutionStatus executionStatus,
-                InvocationStatus invocationStatus) {
+                InvocationStatus invocationStatus, String decidedByName) {
             return new ApprovalView(a.getId(), a.getExecutionId(), executionStatus, a.getAgentId(), agentName,
                     a.getInvocationId(), a.getToolCode(), toolName, a.getMcpServer(), a.getToolCallId(), a.getRisk(),
                     a.getDescription(), a.getReason(), a.getArgumentsRedacted(), a.getArgumentsHash(), a.getPolicyVersion(),
-                    a.getStatus(), a.getRequestedAt(), a.getExpiresAt(), a.getDecidedBy(), a.getDecidedAt(),
+                    a.getStatus(), a.getRequestedAt(), a.getExpiresAt(), a.getDecidedBy(), decidedByName, a.getDecidedAt(),
                     a.getRejectionReason(), invocationStatus);
         }
     }

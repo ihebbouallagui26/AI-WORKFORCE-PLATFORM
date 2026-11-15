@@ -18,7 +18,7 @@ from pydantic import SecretStr
 
 from app.clients.core_api_client import CoreApiClient, ServiceTokenProvider
 from app.core.config import Settings
-from app.core.crypto import StateSealer
+from app.core.crypto import StateBinding, StateSealer
 from app.mcp.executor import ToolExecutionError, ToolOutput
 from app.orchestration.executor import ExecutionRunner
 from app.orchestration.graphs.execution import ToolRuntime
@@ -583,7 +583,7 @@ async def test_a_missing_tampered_or_relocated_state_fails_closed(tamper):
     forged = {"missing": "", "corrupt": blob[:-6] + "abcdef"}.get(tamper)
     if tamper == "other-execution":
         # A sealed state of ANOTHER execution copied onto this thread cannot be opened (AAD binds it).
-        forged = StateSealer(KEY).seal(b'{"system":"s","messages":[]}', StateSealer.aad(ORG, uuid.uuid4()))
+        forged = StateSealer(KEY).seal(b'{"system":"s","messages":[]}', StateBinding(ORG, uuid.uuid4(), f"{ORG}:{uuid.uuid4()}", uuid.uuid4()))
     await runner._graph_for_test(config, forged) if hasattr(runner, "_graph_for_test") else None  # noqa: SLF001
     graph = __import__("app.orchestration.graphs.execution", fromlist=["x"])
     run_ctx = graph.RunContext(organization_id=ORG, execution_id=EXECUTION)

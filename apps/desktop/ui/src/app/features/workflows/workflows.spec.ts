@@ -10,6 +10,7 @@ import { AccessStore } from '../../core/identity/access.store';
 import { PermissionCode } from '../../core/identity/identity.models';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { WorkspaceStore } from '../../core/state/workspace.store';
+import { RUN_POLL_MAX_MS, RUN_POLL_MS } from '../../core/workflows/run-monitor';
 import { RunSummary, WorkflowAction, WorkflowDefinition, WorkflowMessage, WorkflowRun, WorkflowStepView } from '../../core/workflows/workflows.models';
 import { WorkflowDetail } from './workflow-detail';
 import { WorkflowEditor } from './workflow-editor';
@@ -543,6 +544,189 @@ describe('Workflow run page', () => {
     const { fixture, el } = render(WorkflowRunPage, { runId: SCENARIOS['running'].run.id });
     await settle(fixture);
     expect(q(el, '[data-testid="run-error"]')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------- run page, cold start
+
+/**
+ * Regression of the "Loading… for ever" defect found in the real Electron window: after a reload or a direct URL the organization
+ * details (hence the permissions) arrive ASYNCHRONOUSLY, and the page used to read `can('workflow.read')` untracked, so it never
+ * started following the run. These tests use the REAL AccessStore and its real asynchronous resource (only the network is faked),
+ * never a permission that is already there at construction time.
+ */
+describe('Workflow run page: cold start with asynchronous permissions', () => {
+  const ORG_B = '0195f0a4-1c2d-7e3f-8a9b-00000000000b';
+  const RUN = SCENARIOS['running'].run.id;
+  const RUN_2 = '0195f0a4-1c2d-7e3f-8a9b-0000000000f2';
+  const POLL = 40;
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  interface Read { readonly org: string; readonly run: string; readonly at: number }
+
+  function coldStart(options: { permissions?: Record<string, PermissionCode[]>; orgDelayMs?: number; organization?: string | null } = {}) {
+    const desktop = new FakeDesktop();
+    const core = new Core();
+    core.scenario = 'running';
+    const reads: Read[] = [];
+    const orgRequests: string[] = [];
+    const permissions = options.permissions ?? { [ORG]: ALL, [ORG_B]: ALL };
+    desktop.handler = async (request) => {
+      const orgMatch = /^\/api\/v1\/organizations\/([^/]+)$/.exec(request.path);
+      if (orgMatch && request.method === 'GET') {
+        orgRequests.push(orgMatch[1]);
+        await sleep(options.orgDelayMs ?? 60);           // the organization details (and so the permissions) arrive LATER
+        return ok({ id: orgMatch[1], name: 'Acme', myRoles: [], myPermissions: permissions[orgMatch[1]] ?? [] });
+      }
+      const runMatch = /^\/api\/v1\/organizations\/([^/]+)\/workflow-runs\/([^/]+)$/.exec(request.path);
+      if (runMatch) reads.push({ org: runMatch[1], run: runMatch[2], at: Date.now() });
+      return core.handle(request);
+    };
+    desktop.install();
+    const organizationId = signal<string | null>(options.organization === undefined ? ORG : options.organization);
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideRouter([{ path: 'workflows/runs/:runId', component: Stub }, { path: 'workflows', component: Stub }]),
+        { provide: AUTH_REQUIRED, useValue: true },
+        { provide: WorkspaceStore, useValue: { currentOrganizationId: organizationId } },
+        { provide: RUN_POLL_MS, useValue: POLL },
+        { provide: RUN_POLL_MAX_MS, useValue: 200 },
+        // the REAL AccessStore: its organization details are a real asynchronous resource
+      ],
+    });
+    return { desktop, reads, orgRequests, organizationId, access: TestBed.inject(AccessStore) };
+  }
+
+  async function until(condition: () => boolean, fixture?: ComponentFixture<unknown>, timeoutMs = 3000): Promise<void> {
+    const end = Date.now() + timeoutMs;
+    while (!condition() && Date.now() < end) {
+      await sleep(5);
+      TestBed.tick();
+      fixture?.detectChanges();
+    }
+    expect(condition()).toBe(true);
+  }
+
+  const showsRun = (el: HTMLElement) => q(el, '[data-testid="refresh"]') !== null;
+
+  it('starts following the run when the organization and its permissions load after the page was created (reload / direct URL)', async () => {
+    const ctx = coldStart({ orgDelayMs: 120 });
+    expect(ctx.access.can('workflow.read')).toBe(false);                 // the cold-start condition itself: permissions are empty
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await sleep(40);
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(ctx.reads.length).toBe(0);                                    // nothing yet: not allowed to know, and nothing requested
+    expect(showsRun(el)).toBe(false);
+    await until(() => ctx.access.can('workflow.read'), fixture);         // the permission arrives...
+    await until(() => ctx.reads.length > 0, fixture);                    // ...and the page reacts by following the run (the original defect: it did not)
+    await until(() => showsRun(el), fixture);
+    expect(q(el, '[data-testid="run-error"]')).toBeNull();
+    expect(ctx.reads.every((r) => r.org === ORG && r.run === RUN)).toBe(true);
+  });
+
+  it('starts when the organization itself is only known later (no organization yet at construction)', async () => {
+    const ctx = coldStart({ organization: null, orgDelayMs: 30 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await sleep(60);
+    expect(ctx.reads.length).toBe(0);
+    ctx.organizationId.set(ORG);
+    await until(() => showsRun(el), fixture);
+    expect(ctx.reads.length).toBeGreaterThan(0);
+  });
+
+  it('starts at once for a normal internal navigation, when the permissions are already loaded', async () => {
+    const ctx = coldStart({ orgDelayMs: 10 });
+    await until(() => ctx.access.can('workflow.read'));                  // the application has been running: permissions are known
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(el), fixture, 1000);
+    expect(ctx.orgRequests.length).toBe(1);                              // no new organization request was needed
+  });
+
+  it('works after a reload: a brand-new application (new injector) opens the same run URL and loads it', async () => {
+    const first = coldStart({ orgDelayMs: 20 });
+    await until(() => first.access.can('workflow.read'));
+    const warm = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(warm.el), warm.fixture);
+    warm.fixture.destroy();
+    FakeDesktop.uninstall();
+    TestBed.resetTestingModule();                                        // "reload": all in-memory state is gone
+    const reloaded = coldStart({ orgDelayMs: 100 });
+    const view = render(WorkflowRunPage, { runId: RUN });
+    expect(reloaded.access.can('workflow.read')).toBe(false);
+    await until(() => showsRun(view.el), view.fixture);
+    expect(reloaded.reads.length).toBeGreaterThan(0);
+  });
+
+  it('never starts for a person without workflow.read, even after the permissions finished loading', async () => {
+    const ctx = coldStart({ permissions: { [ORG]: ['organization.read', 'agent.read'] }, orgDelayMs: 40 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => ctx.orgRequests.length > 0);
+    await sleep(250);
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(ctx.access.permissions().size).toBeGreaterThan(0);            // the permissions DID load: they just do not include workflow.read
+    expect(ctx.reads.length).toBe(0);
+    expect(text(el)).toContain('Your role does not allow viewing workflows.');
+    expect(showsRun(el)).toBe(false);
+  });
+
+  it('stops following the previous organization when the organization is switched, and shows nothing of its run', async () => {
+    const ctx = coldStart({ orgDelayMs: 80 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(el), fixture);
+    ctx.organizationId.set(ORG_B);                                       // the new organization's permissions are not loaded yet
+    TestBed.tick();
+    fixture.detectChanges();
+    const index = ctx.reads.length;
+    await sleep(30);
+    expect(showsRun(el)).toBe(false);                                    // the previous organization's run is gone from the screen
+    await until(() => ctx.reads.length > index + 1 && showsRun(el), fixture);   // then the run is followed in the new organization
+    const later = ctx.reads.slice(index + 1);                            // (one request of the old organization may have been in flight)
+    expect(later.length).toBeGreaterThan(0);
+    expect(later.every((r) => r.org === ORG_B)).toBe(true);
+  });
+
+  it('follows the new run when the route parameter changes, and stops reading the previous one', async () => {
+    const ctx = coldStart({ orgDelayMs: 10 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(el), fixture);
+    fixture.componentRef.setInput('runId', RUN_2);
+    TestBed.tick();
+    fixture.detectChanges();
+    const index = ctx.reads.length;
+    await until(() => ctx.reads.length > index + 2, fixture);
+    expect(ctx.reads.slice(index).every((r) => r.run === RUN_2)).toBe(true);
+    expect(ctx.reads.slice(index).filter((r) => r.run === RUN).length).toBe(0);
+  });
+
+  it('keeps ONE polling loop when the permissions are updated several times', async () => {
+    const ctx = coldStart({ orgDelayMs: 4 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(el), fixture);
+    for (let i = 0; i < 6; i++) {
+      ctx.access.reload();                                               // a new permission set every time: the effect runs again
+      await sleep(40);
+      TestBed.tick();
+      fixture.detectChanges();
+    }
+    expect(ctx.orgRequests.length).toBeGreaterThanOrEqual(7);            // the updates really happened
+    await sleep(300);
+    const times = ctx.reads.map((r) => r.at);
+    const gaps = times.slice(1).map((t, i) => t - times[i]);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(POLL / 2);          // two loops would read twice in the same instant
+    expect(showsRun(el)).toBe(true);
+  });
+
+  it('stops reading as soon as the page is destroyed', async () => {
+    const ctx = coldStart({ orgDelayMs: 10 });
+    const { fixture, el } = render(WorkflowRunPage, { runId: RUN });
+    await until(() => showsRun(el), fixture);
+    fixture.destroy();
+    const count = ctx.reads.length;
+    await sleep(250);
+    expect(ctx.reads.length).toBeLessThanOrEqual(count + 1);             // at most the request already in flight
   });
 });
 

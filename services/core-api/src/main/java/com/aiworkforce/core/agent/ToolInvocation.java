@@ -66,7 +66,12 @@ public class ToolInvocation {
     @Column(updatable = false)
     private String reason;
 
+    /** LEGACY plaintext result (rows written before V11). New results are never stored here (see {@code resultEnvelope}). */
     private String result;
+
+    /** Versioned AES-256-GCM envelope of the result (V11). Opened only by {@link ToolResultProtector} after authorization. */
+    @Column(name = "result_envelope")
+    private byte[] resultEnvelope;
 
     @Column(name = "result_truncated", nullable = false)
     private boolean resultTruncated;
@@ -150,9 +155,11 @@ public class ToolInvocation {
         startedAt = now;
     }
 
-    void succeed(String boundedResult, boolean truncated, Instant now) {
+    /** The result arrives already ENCRYPTED: the entity never holds a new plaintext result. */
+    void succeed(byte[] protectedResult, boolean truncated, Instant now) {
         transition(InvocationStatus.SUCCEEDED, now);
-        result = boundedResult;
+        result = null;
+        resultEnvelope = protectedResult;
         resultTruncated = truncated;
         completedAt = now;
     }
@@ -183,7 +190,9 @@ public class ToolInvocation {
     public String getArgumentsRedacted() { return argumentsRedacted; }
     public String getArgumentsHash() { return argumentsHash; }
     public String getReason() { return reason; }
-    public String getResult() { return result; }
+    /** Legacy plaintext only (null for every result written since V11): use {@link ToolResultProtector} for the rest. */
+    String getLegacyResult() { return result; }
+    byte[] getResultEnvelope() { return resultEnvelope; }
     public boolean isResultTruncated() { return resultTruncated; }
     public String getErrorCode() { return errorCode; }
     public String getErrorMessage() { return errorMessage; }

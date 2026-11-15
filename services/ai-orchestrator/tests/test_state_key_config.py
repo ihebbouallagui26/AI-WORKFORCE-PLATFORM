@@ -80,18 +80,21 @@ async def test_the_key_is_not_exposed_by_health_runtime_info_or_logs(keys, make_
 
 def test_sealed_state_is_authenticated_and_bound_to_its_key_and_context():
     import uuid
+    from dataclasses import replace
+
+    from app.core.crypto import StateBinding
 
     org, execution = uuid.uuid4(), uuid.uuid4()
-    aad = StateSealer.aad(org, execution)
+    aad = StateBinding(organization_id=org, execution_id=execution, thread_id="thread-1", invocation_id=uuid.uuid4())
     sealed = StateSealer(bytes(range(32))).seal(b"sensitive conversation", aad)
     assert "sensitive" not in sealed and StateSealer(bytes(range(32))).open(sealed, aad) == b"sensitive conversation"
     assert sealed != StateSealer(bytes(range(32))).seal(b"sensitive conversation", aad)      # fresh nonce every time
     with pytest.raises(StateIntegrityError):                                                  # different key
         StateSealer(bytes(range(1, 33))).open(sealed, aad)
     with pytest.raises(StateIntegrityError):                                                  # other execution
-        StateSealer(bytes(range(32))).open(sealed, StateSealer.aad(org, uuid.uuid4()))
+        StateSealer(bytes(range(32))).open(sealed, replace(aad, execution_id=uuid.uuid4()))
     flipped = sealed[:-2] + ("00" if sealed[-2:] != "00" else "ff")
-    for bad in (flipped, sealed[:-2], "zz", "", "02" + sealed[2:]):                           # tampered/truncated/garbage/version
+    for bad in (flipped, sealed[:-2], "zz", "", "03" + sealed[2:]):                           # tampered/truncated/garbage/version
         with pytest.raises(StateIntegrityError):
             StateSealer(bytes(range(32))).open(bad, aad)
 

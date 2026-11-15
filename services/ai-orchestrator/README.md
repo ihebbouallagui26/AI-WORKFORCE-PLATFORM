@@ -86,3 +86,11 @@ Each execution already runs in its own asyncio task with its own `RunContext` an
 the Core API decides which and how many to start). New: the `start` answer carries `maxDelegationsPerTurn`; a coordinator turn may then call `workflow_delegate` several times (each forwarded with its own
 provider tool-call id, bounded, never together with `workflow_finish`) and the turn ends once the Core API accepted something. A failed execution reports the provider usage it already consumed. Tests:
 `tests/test_parallel_execution.py` (a barrier that only opens when all executions are in flight at once proves the overlap; real Anthropic behaviour NOT VERIFIED).
+
+## Security hardening (Sprint C3.6)
+
+* **Checkpoint sealing, format 2:** HKDF-derived key, AAD bound to organization, execution, thread and the paused tool invocation; `AIO_STATE_ACCEPT_LEGACY_FORMAT` (default `true`) keeps format-1 blobs readable until old runs finish. Never replace `AIO_STATE_ENCRYPTION_KEY` while sealed state exists.
+* **Bounded MCP transport:** `AIO_MCP_MAX_MESSAGE_BYTES`, `AIO_MCP_MAX_CALL_BYTES`, `AIO_MCP_STDERR_CAPTURE_BYTES`, `AIO_MCP_STDERR_FLOOD_BYTES`, `AIO_MCP_STDOUT_FLOOD_BYTES`, `AIO_MCP_STDOUT_FLOOD_MESSAGES` (validated ranges; defaults in `app/core/config.py`). Unknown outcomes are reported to the Core API and never replayed. The transport depends on private helpers of `mcp==2.3.0` (exact pin; `tests/test_mcp_sdk_compat.py`).
+* **Transport:** in production `AIO_CORE_API_BASE_URL` and the token/JWKS URLs must be credential-free `https://`; the clients verify certificate chain, expiry and host name, never follow redirects and have no plaintext fallback. To trust an internal CA set `SSL_CERT_FILE` (mounted file, not baked in the image). Tests with real TLS handshakes: `tests/test_internal_tls.py`. No mutual TLS.
+* **Logs:** `redact` / `redact_text` mask secret shapes; tool arguments, results and keys are not logged.
+* Linux run of the suite: mount the repository read-only in a `python:3.13-slim` container, `uv sync --frozen --no-install-project` into `/tmp/venv`, and run `pytest` (Testcontainers needs the Docker socket and `TESTCONTAINERS_HOST_OVERRIDE`).

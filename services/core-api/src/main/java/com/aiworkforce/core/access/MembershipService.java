@@ -93,6 +93,30 @@ public class MembershipService {
                 && memberships.existsByOrganizationIdAndUserIdInAndStatusIn(organizationId, userIds, VISIBLE_STATUSES);
     }
 
+    /**
+     * Display names of USERS as members of THIS organization (any membership status: a past decision keeps the name of the person who
+     * took it). Only members of the organization are resolved, only the display name is returned (never e-mail or ids), and a missing or
+     * blank name gives no entry: the caller shows a neutral fallback, it never invents one. No permission check here: the caller has
+     * already authorized the request for this organization.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> displayNamesOfUsers(UUID organizationId, Collection<UUID> userIds) {
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Membership> found = memberships.findByOrganizationIdAndUserIdIn(organizationId, userIds);
+        Map<UUID, UserSummary> profiles = users.findByIds(found.stream().map(Membership::getUserId).toList());
+        Map<UUID, String> names = new java.util.HashMap<>();
+        for (Membership m : found) {
+            UserSummary profile = profiles.get(m.getUserId());
+            String name = profile == null || profile.displayName() == null ? "" : profile.displayName().replaceAll("[\\p{Cntrl}]+", " ").strip();
+            if (!name.isEmpty()) {
+                names.put(m.getUserId(), name.length() > 80 ? name.substring(0, 80) : name);
+            }
+        }
+        return names;
+    }
+
     /** Link of an employee profile to a platform membership (read model for the workforce modules). */
     public record MemberLink(UUID membershipId, UUID userId, Membership.Status status, String email,
             String displayName) {

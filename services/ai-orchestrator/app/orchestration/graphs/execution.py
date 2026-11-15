@@ -35,11 +35,11 @@ from app.clients.core_api_client import (
     CoreApiNotFound,
     CoreApiUnavailable,
 )
-from app.core.crypto import StateIntegrityError, StateSealer
+from app.core.crypto import StateBinding, StateIntegrityError, StateSealer
 from app.core.errors import OrchestratorError
 from app.core.logging import get_logger
 from app.mcp.executor import McpServerManager, ToolExecutionError
-from app.orchestration.state.models import ExecutionGraphState, assert_state_safe
+from app.orchestration.state.models import ExecutionGraphState, assert_state_safe, thread_id_for
 from app.orchestration.tool_loop import (
     LoopDeps,
     LoopFailure,
@@ -376,9 +376,10 @@ def build_execution_graph(
         if isinstance(outcome, Paused):
             assert runtime is not None  # a coordinator turn never pauses: it has no tool needing approval
             # Persist only what is needed to continue, sealed and bound to this execution; never a credential.
-            aad = StateSealer.aad(run.organization_id, run.execution_id)
+            thread = thread_id_for(run.organization_id, run.execution_id)
+            binding = StateBinding(run.organization_id, run.execution_id, thread, outcome.invocation_id)
             update.update(
-                status="waiting_approval", loop_blob=runtime.sealer.seal(dump(loop), aad),
+                status="waiting_approval", loop_blob=runtime.sealer.seal(dump(loop), binding),
                 awaiting_invocation=str(outcome.invocation_id), steps=["paused_for_approval"],
             )
             return update
@@ -405,7 +406,10 @@ def build_execution_graph(
             raise ExecutionFailure("STATE_UNAVAILABLE")  # the Core API did expect a resume but nothing can be restored
         run.resume = info
         run.agent_id = UUID(agent_id)
-        run.loop = load(tools.sealer.open(blob, StateSealer.aad(run.organization_id, run.execution_id)))
+        # The pause being resumed is the one the Core API names now (its decision), not a value read from the checkpoint.
+        thread = thread_id_for(run.organization_id, run.execution_id)
+        binding = StateBinding(run.organization_id, run.execution_id, thread, info.invocation_id)
+        run.loop = load(tools.sealer.open(blob, binding))
         return {"stage": "resume_prepare", "status": "running", "steps": ["resume"]}
 
     async def report(state: ExecutionGraphState) -> dict[str, Any]:

@@ -56,6 +56,8 @@ export class RunMonitor {
   readonly polling = signal(false);
 
   private runId: string | null = null;
+  /** The organization the run is followed in: a run id alone is not enough to say "this is the run I am following". */
+  private organizationId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
   private failures = 0;
@@ -69,17 +71,48 @@ export class RunMonitor {
     });
   }
 
-  /** Loads the run now and keeps it fresh while it is open. Calling it again for the same run does nothing new. */
+  /**
+   * Loads the run now and keeps it fresh while it is open. Calling it again for the same run in the same organization does nothing new
+   * (so a repeated trigger never creates a second polling loop); another run or another organization replaces what was followed and
+   * what was shown.
+   */
   start(runId: string): void {
-    if (this.runId === runId && (this.polling() || this.loading())) {
+    const organizationId = this.workspace.currentOrganizationId();
+    if (this.runId === runId && this.organizationId === organizationId && (this.polling() || this.loading())) {
       return;
     }
+    const sameTarget = this.runId === runId && this.organizationId === organizationId;
     this.stop();
+    if (!sameTarget) {
+      this.clearData();
+    }
     this.runId = runId;
+    this.organizationId = organizationId;
     this.startedAt = Date.now();
     this.failures = 0;
     this.paused.set(false);
     void this.cycle();
+  }
+
+  /** Stops following anything and forgets what was shown (the permission was lost, or there is no organization any more). */
+  release(): void {
+    this.stop();
+    this.runId = null;
+    this.organizationId = null;
+    this.clearData();
+  }
+
+  private clearData(): void {
+    this.run.set(null);
+    this.steps.set([]);
+    this.summary.set(null);
+    this.actions.set([]);
+    this.messages.set([]);
+    this.live.set(new Map());
+    this.approvals.set([]);
+    this.pendingApprovals.set([]);
+    this.error.set(null);
+    this.lastUpdated.set(null);
   }
 
   stop(): void {
@@ -102,11 +135,15 @@ export class RunMonitor {
   }
 
   private async cycle(): Promise<void> {
-    const organizationId = this.workspace.currentOrganizationId();
+    const organizationId = this.organizationId;
     const runId = this.runId;
     if (this.destroyed || !organizationId || runId === null || this.inFlight) {
       return;
     }
+    if (organizationId !== this.workspace.currentOrganizationId()) {
+      return; // the organization changed since start(): the page restarts the monitor for the new one (or releases it)
+    }
+    let superseded = false;
     this.inFlight = true;
     this.loading.set(true);
     try {
@@ -117,8 +154,9 @@ export class RunMonitor {
         this.api.runActions(organizationId, runId),
         this.api.runMessages(organizationId, runId),
       ]);
-      if (this.destroyed || runId !== this.runId || organizationId !== this.workspace.currentOrganizationId()) {
-        return; // the user left the page or switched organization: this answer is not shown
+      if (this.destroyed || runId !== this.runId || organizationId !== this.organizationId || organizationId !== this.workspace.currentOrganizationId()) {
+        superseded = true; // the user left the page, changed run or switched organization: this answer is not shown
+        return;
       }
       this.run.set(run);
       this.steps.set(steps.content);
@@ -135,8 +173,12 @@ export class RunMonitor {
     } finally {
       this.inFlight = false;
       this.loading.set(false);
+      if (superseded && !this.destroyed && this.runId !== null) {
+        // The target changed while this request was in flight (its start() could not run a cycle meanwhile): follow the new target now.
+        queueMicrotask(() => void this.cycle());
+      }
     }
-    this.schedule();
+    this.schedule(); // (not reached for a superseded answer: it returns above, and the cycle of the new target schedules itself)
   }
 
   private schedule(): void {

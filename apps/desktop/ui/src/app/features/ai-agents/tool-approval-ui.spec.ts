@@ -624,6 +624,26 @@ describe('Organization isolation', () => {
     expect(text(el)).not.toContain('Tool of A');
   });
 
+  it('names the member who decided (display name or a neutral fallback), never an identifier', async () => {
+    const world = setup(ALL);
+    world.data[ORG_A]!.approvals = [
+      approval(1, 10, 'APPROVED', { toolName: 'Named tool', decidedAt: NOW, decidedBy: id(99), decidedByName: 'Ada Lovelace' }),
+      approval(2, 11, 'APPROVED', { toolName: 'Fallback tool', decidedAt: NOW, decidedBy: id(98), decidedByName: 'Organization member' }),
+      approval(3, 12, 'REJECTED', { toolName: 'Old server tool', decidedAt: NOW, decidedBy: id(97) }),   // a server that predates the field
+    ];
+    const fixture = TestBed.createComponent(ApprovalsTab);
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'All') as HTMLElement).click();
+    await until(fixture, () => text(el).includes('Named tool'));
+    const shown = text(el);
+    expect(shown).toContain('by Ada Lovelace');
+    expect(shown.match(/by Organization member/g)?.length).toBe(2);        // the explicit fallback and the missing field
+    expect(shown).not.toContain('by member');
+    // the "by ..." segments carry a name only: no identifier, not even a shortened one (the execution id elsewhere on the card is a separate item)
+    for (const segment of shown.match(/ by [^·]*/g) ?? []) expect(segment).not.toMatch(/[0-9a-f]{8}/);
+  });
+
   it('refuses a decision the moment the organization changes under an open card', async () => {
     const world = setup(ALL);
     world.data[ORG_A]!.approvals = [approval(1, 10)];

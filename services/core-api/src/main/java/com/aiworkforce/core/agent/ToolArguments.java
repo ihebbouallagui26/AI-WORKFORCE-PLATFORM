@@ -1,5 +1,6 @@
 package com.aiworkforce.core.agent;
 
+import com.aiworkforce.core.agent.redaction.Redactor;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -7,7 +8,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -26,20 +26,15 @@ import tools.jackson.databind.json.JsonMapper;
 final class ToolArguments {
 
     private static final JsonMapper MAPPER = JsonMapper.builder().build();
-    private static final Pattern SENSITIVE_KEY = Pattern.compile(
-            "(secret|token|password|passwd|authorization|api[-_]?key|credential|cookie|private[-_]?key)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern SECRET_VALUE = Pattern.compile(
-            "(Bearer\\s+[A-Za-z0-9._~+/=-]{8,}|sk-[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*)");
-    static final String MASK = "[REDACTED]";
-    private static final int MAX_STRING = 300;
+    static final String MASK = Redactor.MASK;
     private static final int MAX_DISPLAY = 2000;
 
     private ToolArguments() {
     }
 
-    /** Masks credential-looking values in free text (Bearer tokens, API keys, JWTs). */
+    /** Masks credential-looking values in free text (see {@link Redactor}). */
     static String maskSecrets(String text) {
-        return text == null ? "" : SECRET_VALUE.matcher(text).replaceAll(MASK);
+        return Redactor.maskText(text);
     }
 
     static String canonical(JsonNode node) {
@@ -96,35 +91,13 @@ final class ToolArguments {
         }
     }
 
-    /** Masked, bounded rendering for humans (approval card, history). Never the raw arguments. */
+    /**
+     * Masked, bounded rendering for humans (approval card, history). Never the raw arguments. DISPLAY ONLY: the canonical form and the
+     * hash an approval is bound to are computed from the original arguments and are not influenced by this method.
+     */
     static String redacted(JsonNode node) {
-        String text = canonical(mask(node, null));
+        String text = canonical(Redactor.maskJson(node));
         return text.length() > MAX_DISPLAY ? text.substring(0, MAX_DISPLAY) + "…" : text;
-    }
-
-    private static JsonNode mask(JsonNode node, String key) {
-        if (key != null && SENSITIVE_KEY.matcher(key).find()) {
-            return MAPPER.getNodeFactory().stringNode(MASK);
-        }
-        if (node.isObject()) {
-            var copy = MAPPER.createObjectNode();
-            for (var entry : node.properties()) {
-                copy.set(entry.getKey(), mask(entry.getValue(), entry.getKey()));
-            }
-            return copy;
-        }
-        if (node.isArray()) {
-            var copy = MAPPER.createArrayNode();
-            for (JsonNode element : node.values()) {
-                copy.add(mask(element, null));
-            }
-            return copy;
-        }
-        if (node.isString()) {
-            String value = SECRET_VALUE.matcher(node.asString()).replaceAll(MASK);
-            return MAPPER.getNodeFactory().stringNode(value.length() > MAX_STRING ? value.substring(0, MAX_STRING) + "…" : value);
-        }
-        return node;
     }
 
     static JsonNode parse(String json) {

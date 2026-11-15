@@ -372,3 +372,16 @@ et `apps/desktop/README.md`.
 * **Récupération manuelle** : proposée uniquement pour un run séquentiel en `WAITING_RECOVERY` dont l'échec est connu et sûr ; pour les workers parallèles, l'interface
   explique que cette capacité n'existe pas. Le Core API répond `409` sinon.
 * **Allowlist Electron** : seuls les endpoints workflow nommés sont joignables (jamais `/internal/**`, jamais un changement d'état forcé), avec tests de refus.
+
+## 15. Réalité de C3.6 (implémenté, vérifié) — durcissement de sécurité et intégration
+
+C3.6 n'ajoute aucune fonction de workflow : il ferme les risques de sécurité restants autour de l'exécution d'outils externes et des états persistés, sans toucher aux invariants C3 (Core = source de vérité, limite C1 de 3 runs ouverts par organisation, `OUTCOME_UNKNOWN` jamais rejoué, approbation liée au SHA-256 des arguments). Détail et preuves : `docs/SPRINT_C3_6_SECURITY_INTEGRATION_REPORT.md`, registre `docs/SECURITY_AUDIT.md`.
+
+* **Résultats d'outils chiffrés au repos (8.1)** : enveloppe AES-256-GCM + HKDF liée à l'organisation, l'exécution et l'invocation ; migration additive V11 et rattrapage applicatif vérifié ; les résultats des étapes de workflow (`workflow_steps`, résultats de synthèse) ne sont **pas** concernés par V11 (seule la table `tool_invocations` l'est) — non modifié par ce sprint.
+* **Rédaction récursive (8.2)** : affichage et journaux seulement ; les arguments exécutés et le hash d'approbation ne changent pas, donc les approbations de workflow restent valides.
+* **Checkpoints scellés et liés (8.3)** : format 2 lié au thread et à l'invocation ; la reprise après approbation (y compris dans un workflow parallèle) échoue en sécurité (`STATE_UNAVAILABLE`) si le blob ne correspond pas à l'invocation attendue.
+* **Sorties MCP bornées (8.4)** : une sortie hors limites termine l'appel avec un statut explicite ; si l'entrée avait commencé, le résultat est `OUTCOME_UNKNOWN`, traité par la politique C3.3 (pas de rejeu automatique, retry manuel restreint).
+* **Identité de l'approbateur (8.5)** : `decidedByName`, limité aux membres de l'organisation, affiché dans les cartes d'approbation d'un run de workflow.
+* **HTTPS interne (8.7)** : démarrage refusé si l'émetteur OIDC, le JWKS ou un fournisseur est en HTTP hors profils `dev`/`test`.
+* **Mesures** (§19 du rapport) : même test de mesure parallèle que C3.4, exécuté sur le commit de base et sur C3.6 sur la même machine : écarts dans le bruit (une seule exécution chacun), concurrence maximale 3 inchangée. Aucune mesure de charge.
+* **Hors périmètre / non vérifié** : rotation des clés, WAL/PITR, scan des images, exécution Linux du Core/Electron, TLS de production réel.

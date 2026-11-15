@@ -245,6 +245,8 @@ export interface ApprovalSummary {
   readonly requestedAt: string;
   readonly expiresAt: string;
   readonly decidedBy: string | null;
+  /** Display name of the member who decided, or a neutral fallback ("Organization member"); null while undecided (fix 8.5). */
+  readonly decidedByName?: string | null;
   readonly decidedAt: string | null;
   readonly rejectionReason: string | null;
 }
@@ -295,6 +297,8 @@ export interface ToolApproval {
   readonly requestedAt: string;
   readonly expiresAt: string;
   readonly decidedBy: string | null;
+  /** Display name of the member who decided, or a neutral fallback ("Organization member"); null while undecided (fix 8.5). */
+  readonly decidedByName?: string | null;
   readonly decidedAt: string | null;
   readonly rejectionReason: string | null;
   readonly invocationStatus: InvocationStatus | null;

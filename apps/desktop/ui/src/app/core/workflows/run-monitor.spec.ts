@@ -13,6 +13,8 @@ const ORG = '0195f0a4-1c2d-7e3f-8a9b-00000000000a';
 const real = <T>(name: string): T => REAL_API_C3[name] as T;
 const page = <T>(content: readonly T[]) => ({ content, page: 0, size: 100, totalElements: content.length, totalPages: 1 });
 const OPEN_RUN = real<WorkflowRun>('runStarted');
+const RUN_A = '0195f0a4-1c2d-7e3f-8a9b-0000000000a1';
+const RUN_B = '0195f0a4-1c2d-7e3f-8a9b-0000000000a2';
 const OPEN_STEPS = real<Page<WorkflowStepView>>('stepsQueuedAndRunning').content;
 const DONE_RUN = real<WorkflowRun>('runSucceeded');
 const DONE_STEPS = real<Page<WorkflowStepView>>('stepsWithRetry').content;
@@ -28,6 +30,8 @@ class Api {
   failing = false;
   delayMs = 0;
   runReads = 0;
+  /** Every read of a run, in order: `/api/v1/organizations/<org>/workflow-runs/<run>`. */
+  runPaths: string[] = [];
   executionReads = 0;
   inFlightRuns = 0;
   maxInFlightRuns = 0;
@@ -36,6 +40,7 @@ class Api {
     const path = request.path;
     const isRun = /\/workflow-runs\/[^/]+$/.test(path);
     if (isRun) {
+      this.runPaths.push(path);
       this.runReads++;
       this.inFlightRuns++;
       this.maxInFlightRuns = Math.max(this.maxInFlightRuns, this.inFlightRuns);
@@ -198,6 +203,59 @@ describe('RunMonitor: the polling lifecycle', () => {
     await wait(200);
     expect(monitor.run()).toBeNull();
     monitor.stop();
+  });
+
+  it('stops following the previous run and shows nothing of it when another run is followed', async () => {
+    const { monitor, api } = setup({ poll: 20 });
+    monitor.start(RUN_A);
+    await until(() => monitor.run() !== null);
+    monitor.start(RUN_B);
+    expect(monitor.run()).toBeNull();                               // what belonged to run-a is not shown under run-b
+    const after = api.runPaths.length;
+    await until(() => api.runPaths.length > after + 1 && monitor.run() !== null);
+    expect(api.runPaths.slice(after).every((p) => p.endsWith(`/${RUN_B}`))).toBe(true);
+    monitor.stop();
+  });
+
+  it('follows the new run even when the previous run had a request in flight (its answer is dropped, not the new start)', async () => {
+    const { monitor, api } = setup({ poll: 20 });
+    api.delayMs = 60;
+    monitor.start(RUN_A);                                          // in flight
+    monitor.start(RUN_B);                                          // cannot start a cycle while run-a's request is open
+    await until(() => api.runPaths.some((p) => p.endsWith(`/${RUN_B}`)) && monitor.run() !== null, 3000);
+    await wait(150);
+    expect(api.runPaths.filter((p) => p.endsWith(`/${RUN_B}`)).length).toBeGreaterThanOrEqual(2);   // and it keeps polling
+    expect(monitor.run()).not.toBeNull();
+    monitor.stop();
+  });
+
+  it('stops requesting the previous organization after a switch, and follows the same run in the new one only when started again', async () => {
+    const { monitor, api, organizationId } = setup({ poll: 20 });
+    monitor.start(OPEN_RUN.id);
+    await until(() => api.runReads >= 2);
+    const other = '0195f0a4-1c2d-7e3f-8a9b-00000000000b';
+    organizationId.set(other);
+    await wait(10);                                                  // a request issued before the switch may still be in flight
+    const after = api.runPaths.length;
+    await wait(200);
+    expect(api.runPaths.length).toBe(after);                         // the timer never reads the run in the other organization by itself
+    monitor.start(OPEN_RUN.id);
+    await until(() => api.runPaths.some((p) => p.includes(`/${other}/`)));
+    expect(api.runPaths.slice(after).every((p) => p.includes(`/${other}/`))).toBe(true);
+    monitor.stop();
+  });
+
+  it('release() stops everything and forgets the run (permission lost, or no organization)', async () => {
+    const { monitor, api } = setup({ poll: 20 });
+    monitor.start(OPEN_RUN.id);
+    await until(() => monitor.run() !== null);
+    monitor.release();
+    const after = api.runReads;
+    await wait(150);
+    expect(api.runReads).toBeLessThanOrEqual(after + 1);             // at most the request that was already in flight
+    expect(monitor.run()).toBeNull();
+    expect(monitor.steps()).toEqual([]);
+    expect(monitor.polling()).toBe(false);
   });
 
   it('reads executions and approvals only when the user is allowed to, and not at all for a run without live workers', async () => {

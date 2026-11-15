@@ -18,6 +18,7 @@ from app.core.crypto import StateSealer
 from app.core.errors import UnavailableError
 from app.core.logging import configure_logging, get_logger
 from app.core.security import JwtVerifier
+from app.mcp.bounded_stdio import McpOutputLimits
 from app.mcp.configuration import McpServerConfig
 from app.mcp.executor import McpServerManager
 from app.orchestration.checkpointer.postgres import open_postgres_checkpointer, ping
@@ -71,10 +72,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         [McpServerConfig(name=name, server_id=name, timeout_seconds=settings.mcp_timeout_seconds)  # type: ignore[arg-type]
                          for name in settings.mcp_servers],
                         max_concurrent_calls=settings.mcp_max_concurrent_calls,
+                        limits=McpOutputLimits(
+                            max_message_bytes=settings.mcp_max_message_bytes,
+                            stderr_capture_bytes=settings.mcp_stderr_capture_bytes,
+                            stderr_flood_bytes=settings.mcp_stderr_flood_bytes,
+                            stdout_flood_bytes=settings.mcp_stdout_flood_bytes,
+                            stdout_flood_messages=settings.mcp_stdout_flood_messages,
+                            max_call_bytes=settings.mcp_max_call_bytes,
+                        ),
                     )
                     stack.push_async_callback(manager.aclose)  # stops every MCP child process at shutdown
                     tool_runtime = ToolRuntime(
-                        manager=manager, sealer=StateSealer(settings.state_key_bytes()), max_rounds=settings.tool_max_rounds,
+                        manager=manager, sealer=StateSealer(settings.state_key_bytes(), accept_legacy=settings.state_accept_legacy_format),
+                        max_rounds=settings.tool_max_rounds,
                         max_calls=settings.tool_max_calls_per_run, output_max_chars=settings.tool_output_max_chars,
                     )
                 runner = ExecutionRunner(settings, app.state.core_api, providers, saver, tool_runtime)

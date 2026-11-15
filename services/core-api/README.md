@@ -329,3 +329,12 @@ Independent workers may run at the same time, in both modes; the default stays s
   steps expose `groupNo` and `QUEUED`.
 - Failed executions now report the provider usage already consumed (`inputTokens`/`outputTokens` on the internal `fail`): it counts toward the workflow budget.
 - Not guaranteed: exactly-once external effects; no manual recovery in parallel workflows; no per-provider concurrency limit.
+
+## Security hardening and production readiness (Sprint C3.6)
+
+* **Tool results encrypted at rest** (`ToolResultProtector`, migration `V11__tool_result_encryption.sql`): AES-256-GCM, HKDF purpose key derived from `SECRETS_MASTER_KEY`, AAD bound to organization/execution/invocation. A verified application backfill (`ToolResultBackfill`) converts legacy plaintext at startup and logs `converted=N failed_verification=M`. Final answers and workflow action results are **not** encrypted (see `docs/SECURITY_AUDIT.md`, N-9). The key is not in the database: back it up separately and never replace it.
+* **Display redaction** (`agent/redaction/Redactor`): recursive and bounded; applies to approval cards, histories, audit and logs only; executed arguments and the approval hash are unchanged.
+* **Approver identity:** approvals expose `decidedByName` (display name of an active or former member of the same organization, else `Organization member`); `decidedBy` is kept.
+* **Transport security:** outside the `dev` and `test` profiles the application refuses to start unless the OIDC issuer, the JWKS URL, the provider endpoints and the orchestrator/token URLs are credential-free `https://` (`OidcTransportValidator`, `ProviderTransportValidator`, `OrchestratorDispatchValidator`). Trust additional CAs with the JVM trust store (`javax.net.ssl.trustStore`), never by disabling verification. No mutual TLS.
+* **Operations:** `docs/OPERATIONS_RUNBOOK.md` (22 procedures). Restore with ownership preserved (`pg_restore` without `--no-owner`) after provisioning the server (`infra/docker/postgres/init-roles.sh`).
+* Report: `docs/SPRINT_C3_6_SECURITY_INTEGRATION_REPORT.md`; checklist: `docs/PRODUCTION_READINESS_CHECKLIST.md`.

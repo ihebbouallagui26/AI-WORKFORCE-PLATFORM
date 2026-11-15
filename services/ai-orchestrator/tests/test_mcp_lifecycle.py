@@ -151,7 +151,9 @@ async def test_a_crash_during_a_call_is_reported_not_retried_and_cleaned(manager
 
 async def test_oversized_output_is_truncated_to_the_limit_and_flagged(manager):
     m = manager()
-    out = await call(m, "big", {"size": 2_000_000}, limit=1000)
+    # A large VALID result below the message limit (1 MiB on the wire, i.e. about 400 k characters because the text is repeated as structured content; fix 8.4) is received and then truncated. A message above the
+    # limit is not truncated but refused while it is read: see tests/test_mcp_output_limits.py.
+    out = await call(m, "big", {"size": 400_000}, limit=1000)
     assert out.truncated is True and len(out.text.encode()) <= 1000     # nothing larger is ever returned to the model
 
 
@@ -163,10 +165,11 @@ async def test_output_at_the_limit_is_not_flagged(manager):
 async def test_a_tool_error_is_normalized_and_the_message_is_bounded(manager, capsys):
     with pytest.raises(ToolExecutionError) as caught:
         await call(manager(), "fail")
-    assert caught.value.error_code == "TOOL_ERROR" and len(str(caught.value)) <= 400
-    # The server's error text is data for the model (wrapped as untrusted upstream); it is never logged by the manager.
+    assert caught.value.error_code == "TOOL_ERROR" and str(caught.value) == "The tool reported an error."
+    # The server's error text is untrusted tool OUTPUT: it is neither forwarded in the exception (the Core API would store it as the
+    # call's error message, outside the encrypted result, security fix 8.1) nor logged by the manager.
     captured = capsys.readouterr()
-    assert "SHOULD-NOT-LEAK" not in captured.out
+    assert "SHOULD-NOT-LEAK" not in captured.out and "SHOULD-NOT-LEAK" not in captured.err
 
 
 # ---- E. cleanup --------------------------------------------------------------------------------------------------------

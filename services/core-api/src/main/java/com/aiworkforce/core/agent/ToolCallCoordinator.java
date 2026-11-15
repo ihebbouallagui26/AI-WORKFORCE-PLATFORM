@@ -65,12 +65,14 @@ class ToolCallCoordinator {
     private final ExecutionProperties properties;
     private final Clock clock;
     private final WorkflowStepRepository workflowSteps;
+    private final ToolResultProtector resultProtector;
 
     ToolCallCoordinator(ExecutionRepository executions, ToolInvocationRepository invocations,
             ToolApprovalRepository approvals, ToolDefinitionRepository toolDefinitions, ToolGrantRepository grants,
             AgentSupport support, SensitivePayloadVault vault, AuditLog audit, ExecutionProperties properties,
-            Clock clock, WorkflowStepRepository workflowSteps) {
+            Clock clock, WorkflowStepRepository workflowSteps, ToolResultProtector resultProtector) {
         this.workflowSteps = workflowSteps;
+        this.resultProtector = resultProtector;
         this.executions = executions;
         this.invocations = invocations;
         this.approvals = approvals;
@@ -307,7 +309,8 @@ class ToolCallCoordinator {
                 bounded = bounded.substring(0, properties.maxToolOutputChars());
                 truncated = true;
             }
-            invocation.succeed(bounded, truncated, now);
+            // The result is encrypted BEFORE it reaches the entity: the plaintext is never persisted or held by the row.
+            invocation.succeed(resultProtector.seal(organizationId, executionId, invocationId, bounded), truncated, now);
         } else {
             String safeCode = errorCode != null && CODE.matcher(errorCode).matches() ? errorCode : "TOOL_FAILED";
             invocation.fail(safeCode, safeMessage(message), now);

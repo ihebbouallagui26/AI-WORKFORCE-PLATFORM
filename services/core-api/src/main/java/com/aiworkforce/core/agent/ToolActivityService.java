@@ -8,12 +8,14 @@ import com.aiworkforce.core.agent.ToolPolicyEvaluator.Evaluation;
 import com.aiworkforce.core.agent.ToolViews.AvailableTool;
 import com.aiworkforce.core.agent.ToolViews.InvocationView;
 import com.aiworkforce.core.common.exception.ResourceNotFoundException;
+import com.aiworkforce.core.agent.redaction.Redactor;
 import com.aiworkforce.core.identity.AuthenticatedUser;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -31,10 +33,14 @@ public class ToolActivityService {
     private final ExecutionRepository executions;
     private final AgentSupport support;
     private final TenantAccessService access;
+    private final ToolResultProtector resultProtector;
+    private final ApproverNames approverNames;
 
     public ToolActivityService(ToolInvocationRepository invocations, ToolApprovalRepository approvals,
             ToolDefinitionRepository toolDefinitions, ToolGrantRepository grants, ExecutionRepository executions,
-            AgentSupport support, TenantAccessService access) {
+            AgentSupport support, TenantAccessService access, ToolResultProtector resultProtector, ApproverNames approverNames) {
+        this.resultProtector = resultProtector;
+        this.approverNames = approverNames;
         this.invocations = invocations;
         this.approvals = approvals;
         this.toolDefinitions = toolDefinitions;
@@ -63,13 +69,44 @@ public class ToolActivityService {
         return views(organizationId, invocations.searchByOrganization(organizationId, agentId, status, pageable));
     }
 
+    /** Display form of a tool result: recognizable secrets are masked (the stored/encrypted result and what the model saw are unchanged). */
+    private static String displayable(String result) {
+        return result == null ? null : Redactor.maskText(result);
+    }
+
     private Page<InvocationView> views(UUID organizationId, Page<ToolInvocation> page) {
         Map<String, String> names = toolDefinitions
                 .findAllById(page.getContent().stream().map(ToolInvocation::getToolCode).distinct().toList()).stream()
                 .collect(Collectors.toMap(ToolDefinition::getCode, ToolDefinition::getName));
-        List<InvocationView> content = page.getContent().stream().map(i -> InvocationView.of(i, names.get(i.getToolCode()),
-                approvals.findByOrganizationIdAndInvocationId(organizationId, i.getId()).orElse(null))).toList();
+        // Authorization was verified by the public method that called this one: only now is a result decrypted.
+        Map<UUID, java.util.Optional<ToolApproval>> approvalOf = page.getContent().stream().collect(Collectors.toMap(ToolInvocation::getId,
+                i -> approvals.findByOrganizationIdAndInvocationId(organizationId, i.getId())));
+        Map<UUID, String> deciders = approverNames.resolve(organizationId,
+                approvalOf.values().stream().flatMap(java.util.Optional::stream).map(ToolApproval::getDecidedBy).toList());
+        List<InvocationView> content = page.getContent().stream().map(i -> {
+            ToolApproval approval = approvalOf.get(i.getId()).orElse(null);
+            return InvocationView.of(i, names.get(i.getToolCode()), approval, approval == null ? null : deciders.get(approval.getDecidedBy()),
+                    resultOf(organizationId, i));
+        }).toList();
         return new PageImpl<>(content, page.getPageable(), page.getTotalElements());
+    }
+
+    /**
+     * The result to show: decrypted from the envelope, or the legacy plaintext of a row not yet converted. An envelope that cannot be
+     * authenticated (wrong key, tampering, relocation) yields NO result, never the raw bytes and never a partial text; only the invocation
+     * id is logged.
+     */
+    private String resultOf(UUID organizationId, ToolInvocation invocation) {
+        byte[] envelope = invocation.getResultEnvelope();
+        if (envelope == null) {
+            return displayable(invocation.getLegacyResult());
+        }
+        try {
+            return displayable(resultProtector.open(organizationId, invocation.getExecutionId(), invocation.getId(), envelope));
+        } catch (ToolResultProtector.ToolResultUnavailableException e) {
+            LoggerFactory.getLogger(ToolActivityService.class).warn("tool result of invocation {} could not be authenticated", invocation.getId());
+            return null;
+        }
     }
 
     /**

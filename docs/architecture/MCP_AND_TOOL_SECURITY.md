@@ -25,8 +25,20 @@ structuré en JSON compact si pas de texte), tronqué à la limite de l'outil (`
 `AIO_TOOL_OUTPUT_MAX_CHARS` (8000). Les erreurs sont normalisées en codes sûrs : `MCP_UNAVAILABLE`, `TOOL_TIMEOUT`,
 `TOOL_NOT_FOUND`, `TOOL_ERROR`, `SERVER_NOT_CONFIGURED`.
 
-**Limite connue.** La troncature a lieu *après* réception du message complet : un serveur de confiance mais défectueux peut
-faire allouer plusieurs Mo avant la coupe (testé : 2 Mo → 1000 octets renvoyés). Aucune limite de taille côté transport.
+**Limites de sortie (correctif de sécurité 8.4, Sprint C3.6).** Avant le correctif, la troncature avait lieu *après* réception du
+message complet et le lecteur stdout du SDK accumulait sans borne tout ce qui suit le dernier saut de ligne (mesuré : une attaque
+de 64 Mo sans saut de ligne faisait monter la mémoire Python à 192 Mo) ; stderr n'était pas capturé (hérité du processus parent :
+log non borné). Désormais `app/mcp/bounded_stdio.py` remplace le transport stdio du SDK :
+* **stdout** : lu en octets par blocs de 64 Kio, le tampon de la ligne en cours ne dépasse jamais `AIO_MCP_MAX_MESSAGE_BYTES`
+  (1 Mio par défaut, 64 Kio à 16 Mio), la taille étant vérifiée *avant* chaque ajout. Au dépassement, l'arbre de processus est terminé,
+  rien n'est analysé ni livré (jamais de message JSON-RPC tronqué) et l'appel est rapporté au Core API comme `OUTCOME_UNKNOWN` ;
+* **stderr** : pipe vidé en continu (pas d'interblocage), seuls les `AIO_MCP_STDERR_CAPTURE_BYTES` premiers octets sont conservés
+  (16 Kio par défaut, 1 Kio à 1 Mio), caractères de contrôle retirés et secrets masqués, troncature signalée ; au-delà de
+  `AIO_MCP_STDERR_FLOOD_BYTES` par fenêtre de 10 s (8 Mio par défaut) le serveur est considéré abusif et terminé. Une seule ligne de
+  log bornée (2 048 caractères) par connexion ;
+* un appel dont la sortie dépasse une limite **est démarré** : l'effet externe a pu se produire. Il n'est donc jamais rejoué, l'exécution
+  se termine (le modèle ne peut pas répéter l'action) et le Core API classe l'étape `OUTCOME_UNKNOWN` (jamais de retry C3.3).
+Détails, mesures et limites résiduelles : `docs/SPRINT_C3_6_SECURITY_INTEGRATION_REPORT.md`, section 10.
 
 ## 2. Modèle de confiance des serveurs MCP
 

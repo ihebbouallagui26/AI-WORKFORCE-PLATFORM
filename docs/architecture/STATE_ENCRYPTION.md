@@ -17,7 +17,11 @@ checkpoint LangGraph, **scellée** par l'application avant d'y être écrite.
 Le chiffrement ne remplace pas l'autorisation : l'accès à une exécution reste contrôlé par le Core API, qui revalide
 chaque appel d'outil.
 
-## 2. Mécanisme (inchangé, `app/core/crypto.py`)
+## 2. Mécanisme (`app/core/crypto.py`) — format 2 depuis le sprint C3.6 (correctif 8.3)
+
+**Format 2 (écriture) :** clé de scellement **dérivée** par HKDF-SHA256 de la clé configurée (info `checkpoint-loop|key-id=1`, jamais la clé brute), octet de version `0x02`, octet d'identifiant de clé `0x01`, nonce aléatoire de 96 bits. L'AAD lie le but, la version, l'identifiant de clé, l'organisation, l'exécution, le **thread** et l'**invocation d'outil** sur laquelle le run est en pause : un blob copié vers une autre invocation, un autre thread ou une autre exécution est refusé (`STATE_UNAVAILABLE`, aucun outil exécuté).
+**Format 1 (lecture seule) :** les blobs écrits avant C3.6 (clé brute, AAD organisation + exécution) restent lisibles tant que `AIO_STATE_ACCEPT_LEGACY_FORMAT` vaut `true` (défaut) ; mettre `false` une fois les anciens runs terminés. Aucune écriture au format 1.
+Vérifié : tests unitaires et PostgreSQL réel (`test_checkpoint_protection.py`, `test_state_persistence_postgres.py`), et copie restaurée d'une base de checkpoints (69 blobs format 1 ouverts avec la clé existante, tous refusés avec une autre clé). Le texte ci-dessous décrit le socle C2.3, toujours valable pour le reste (AES-256-GCM, validation de la clé, absence de repli en clair).
 
 * AES-256-GCM (bibliothèque `cryptography`), nonce aléatoire de 96 bits par scellement, octet de version `0x01`.
 * Format : `hex(version ‖ nonce ‖ ciphertext+tag)`. Le tag GCM authentifie le contenu **et** l'AAD.
@@ -58,7 +62,7 @@ valeur (la remplacer rendrait l'état scellé illisible). Il ne tente jamais de 
 Ne **jamais** remplacer la valeur de la variable tant que des checkpoints scellés existent : ils deviendraient illisibles.
 Une rotation contrôlée exigerait : un identifiant de version de clé dans le format scellé (l'octet de version existe
 mais ne code aujourd'hui qu'un format), un trousseau (nouvelle clé pour sceller, anciennes pour ouvrir), puis un
-rescellement hors ligne de tous les checkpoints ouverts, avant retrait de l'ancienne clé. Rien de cela n'est fait.
+rescellement hors ligne de tous les checkpoints ouverts, avant retrait de l'ancienne clé. Rien de cela n'est fait. (C3.6 : l'identifiant de clé existe maintenant dans le format 2 — `key-id=1` — ce qui prépare le trousseau, mais **aucun outil de rotation ni de rescellement n'est livré** ; voir `docs/SECURITY_AUDIT.md`, N-2.)
 
 ## 6. Tests réellement exécutés
 

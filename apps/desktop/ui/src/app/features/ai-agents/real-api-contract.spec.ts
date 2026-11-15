@@ -26,10 +26,10 @@ const INVOCATION_KEYS = {
 } satisfies Record<keyof ToolInvocation, 1>;
 const APPROVAL_KEYS = {
   id: 1, executionId: 1, executionStatus: 1, agentId: 1, agentName: 1, invocationId: 1, toolCode: 1, toolName: 1, mcpServer: 1, toolCallId: 1, risk: 1, description: 1,
-  reason: 1, argumentsRedacted: 1, argumentsHash: 1, policyVersion: 1, status: 1, requestedAt: 1, expiresAt: 1, decidedBy: 1, decidedAt: 1, rejectionReason: 1,
+  reason: 1, argumentsRedacted: 1, argumentsHash: 1, policyVersion: 1, status: 1, requestedAt: 1, expiresAt: 1, decidedBy: 1, decidedByName: 1, decidedAt: 1, rejectionReason: 1,
   invocationStatus: 1,
 } satisfies Record<keyof ToolApproval, 1>;
-const SUMMARY_KEYS = { id: 1, status: 1, requestedAt: 1, expiresAt: 1, decidedBy: 1, decidedAt: 1, rejectionReason: 1 } satisfies Record<keyof ApprovalSummary, 1>;
+const SUMMARY_KEYS = { id: 1, status: 1, requestedAt: 1, expiresAt: 1, decidedBy: 1, decidedByName: 1, decidedAt: 1, rejectionReason: 1 } satisfies Record<keyof ApprovalSummary, 1>;
 
 const EXECUTION_STATUS: readonly ExecutionStatus[] = ['PENDING', 'RUNNING', 'WAITING_APPROVAL', 'SUCCEEDED', 'FAILED'];
 const INVOCATION_STATUS: readonly InvocationStatus[] = ['DENIED', 'AWAITING_APPROVAL', 'APPROVED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'REJECTED', 'EXPIRED'];
