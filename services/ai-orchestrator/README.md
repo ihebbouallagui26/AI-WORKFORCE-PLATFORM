@@ -79,3 +79,10 @@ The orchestrator never decides a retry. It reports every failure with a precise 
 When an execution belongs to a workflow, the `start` answer carries `deadlineSeconds` (the earlier of the step and workflow deadlines): the run is bounded by it and fails with
 `DEADLINE_EXCEEDED` instead of extending it; a tool call cut short has an UNKNOWN outcome, recorded by the Core API, and is never replayed here. Failure messages come from a
 fixed table: no task, credential or provider text. Tests: `tests/test_workflow_reliability.py` (scripted adapters, stubbed Core API; real Anthropic behaviour NOT VERIFIED).
+
+## Parallel multi-agent execution (Sprint C3.4)
+
+Each execution already runs in its own asyncio task with its own `RunContext` and graph, so independent worker turns run concurrently with nothing shared (capacity: `AIO_MAX_CONCURRENT_EXECUTIONS`, default 4;
+the Core API decides which and how many to start). New: the `start` answer carries `maxDelegationsPerTurn`; a coordinator turn may then call `workflow_delegate` several times (each forwarded with its own
+provider tool-call id, bounded, never together with `workflow_finish`) and the turn ends once the Core API accepted something. A failed execution reports the provider usage it already consumed. Tests:
+`tests/test_parallel_execution.py` (a barrier that only opens when all executions are in flight at once proves the overlap; real Anthropic behaviour NOT VERIFIED).

@@ -129,7 +129,7 @@ public class WorkflowRunService {
                 stepList, participantAgents.stream().sorted().toList(), definition.getMaxSteps(), definition.getMaxRetriesPerStep(),
                 definition.getTokenBudget(), definition.getDeadlineSeconds(), definition.getMode().name(),
                 coordinated ? definition.getCoordinatorAgentId() : null, members, definition.getFailurePolicy().name(),
-                definition.getRecoveryMode().name(), definition.getStepTimeoutSeconds());
+                definition.getRecoveryMode().name(), definition.getStepTimeoutSeconds(), definition.getMaxParallelWorkers());
         // save() merges an entity with an assigned id and returns the MANAGED copy: only that one may be modified afterwards.
         WorkflowRun run = runs.save(new WorkflowRun(UUID.randomUUID(), definition, WorkflowSpec.toJson(snapshot), user.userId(),
                 requestId, WorkflowText.mask(cleaned), coordinated ? definition.getMaxSteps() : stepList.size(), MDC.get(RequestIdFilter.MDC_KEY), now));
@@ -306,7 +306,8 @@ public class WorkflowRunService {
         int auto = 0, manual = 0, failed = 0;
         Instant nextRetry = null;
         for (WorkflowStep s : all) {
-            AgentExecution e = executionRepository.findByOrganizationIdAndId(organizationId, s.getExecutionId()).orElse(null);
+            AgentExecution e = s.getExecutionId() == null ? null
+                    : executionRepository.findByOrganizationIdAndId(organizationId, s.getExecutionId()).orElse(null);
             long i = e == null || e.getInputTokens() == null ? 0 : e.getInputTokens();
             long o = e == null || e.getOutputTokens() == null ? 0 : e.getOutputTokens();
             in += i;
@@ -330,8 +331,11 @@ public class WorkflowRunService {
             }
             Instant end = s.getCompletedAt() != null ? s.getCompletedAt() : (run.getStatus().isOpen() ? now : null);
             Long duration = end == null || s.getStartedAt() == null ? null : java.time.Duration.between(s.getStartedAt(), end).toMillis();
+            // Queue wait: from the moment the work was accepted (persisted) to its dispatch (or until now while it still waits).
+            Instant dispatched = s.getStartedAt() != null ? s.getStartedAt() : (s.getStatus() == WorkflowStepStatus.QUEUED ? now : null);
+            Long queueWait = dispatched == null || s.getGroupNo() == null ? null : java.time.Duration.between(s.getCreatedAt(), dispatched).toMillis();
             attempts.add(new WorkflowViews.AttemptUsageView(s.getStepRank(), s.getAttempt(), s.getRole(), s.getLaunchReason(), s.getStatus(),
-                    s.getErrorCode(), s.getFailureCategory(), s.getRetrySafe(), s.getExecutionId(), duration, i, o));
+                    s.getErrorCode(), s.getFailureCategory(), s.getRetrySafe(), s.getExecutionId(), duration, i, o, s.getGroupNo(), queueWait));
         }
         Instant from = run.getStartedAt() != null ? run.getStartedAt() : run.getCreatedAt();
         Instant until = run.getCompletedAt() != null ? run.getCompletedAt() : now;
@@ -339,7 +343,75 @@ public class WorkflowRunService {
                 run.getStartedAt(), run.getCompletedAt(), run.getDeadlineAt(), java.time.Duration.between(from, until).toMillis(), all.size(), auto,
                 manual, failed, byCategory, in, out, coordinator, workers, run.getTokenBudget(),
                 Math.max(0, (long) run.getTokenBudget() - run.getTokensUsed()), nextRetry,
-                run.getStatus() == WorkflowRunStatus.WAITING_RECOVERY, run.getErrorCode(), attempts);
+                run.getStatus() == WorkflowRunStatus.WAITING_RECOVERY, run.getErrorCode(), attempts, run.getMaxParallelWorkers(),
+                peak(all, now), run.getReservedTokens(), groups(all, now));
+    }
+
+    /** The highest number of children that were really running at the same moment (from the recorded dispatch and end times). */
+    private static int peak(List<WorkflowStep> all, Instant now) {
+        List<long[]> events = new java.util.ArrayList<>();
+        for (WorkflowStep s : all) {
+            if (s.getStartedAt() == null || s.getExecutionId() == null) {
+                continue;
+            }
+            long end = (s.getCompletedAt() != null ? s.getCompletedAt() : now).toEpochMilli();
+            events.add(new long[] {s.getStartedAt().toEpochMilli(), 1});
+            events.add(new long[] {end, -1});
+        }
+        events.sort((a, b) -> a[0] != b[0] ? Long.compare(a[0], b[0]) : Long.compare(a[1], b[1])); // an end at the same instant counts before a start
+        int current = 0;
+        int best = 0;
+        for (long[] e : events) {
+            current += (int) e[1];
+            best = Math.max(best, current);
+        }
+        return best;
+    }
+
+    private static List<WorkflowViews.GroupView> groups(List<WorkflowStep> all, Instant now) {
+        Map<Integer, Map<Integer, WorkflowStep>> byGroup = new java.util.TreeMap<>();
+        for (WorkflowStep s : all) {
+            if (s.getGroupNo() != null && !WorkflowScheduler.COORDINATOR.equals(s.getRole())) {
+                byGroup.computeIfAbsent(s.getGroupNo(), k -> new java.util.TreeMap<>()).put(s.getStepRank(), s); // the last attempt of a rank counts
+            }
+        }
+        List<WorkflowViews.GroupView> out = new java.util.ArrayList<>();
+        for (Map.Entry<Integer, Map<Integer, WorkflowStep>> g : byGroup.entrySet()) {
+            int q = 0, r = 0, w = 0, ok = 0, bad = 0, cancelled = 0;
+            Instant first = null;
+            Instant last = null;
+            boolean allFinal = true;
+            for (WorkflowStep s : g.getValue().values()) {
+                switch (s.getStatus()) {
+                    case QUEUED -> q++;
+                    case RUNNING -> r++;
+                    case WAITING_APPROVAL -> w++;
+                    case SUCCEEDED -> ok++;
+                    case FAILED -> bad++;
+                    case CANCELLED -> cancelled++;
+                }
+                allFinal &= s.getStatus().isFinal();
+                if (s.getStartedAt() != null && (first == null || s.getStartedAt().isBefore(first))) {
+                    first = s.getStartedAt();
+                }
+                if (s.getCompletedAt() != null && (last == null || s.getCompletedAt().isAfter(last))) {
+                    last = s.getCompletedAt();
+                }
+            }
+            String status;
+            if (allFinal) {
+                status = bad == 0 && cancelled == 0 ? "COMPLETED" : ok > 0 ? "PARTIALLY_FAILED" : bad > 0 ? "FAILED" : "CANCELLED";
+            } else if (r > 0) {
+                status = "RUNNING";
+            } else if (w > 0 && q == 0) {
+                status = "WAITING_FOR_APPROVAL";
+            } else {
+                status = "QUEUED";
+            }
+            out.add(new WorkflowViews.GroupView(g.getKey(), status, g.getValue().size(), q, r, w, ok, bad, cancelled, first, allFinal ? last : null,
+                    peak(new java.util.ArrayList<>(g.getValue().values()), now)));
+        }
+        return out;
     }
 
     private WorkflowRun load(UUID organizationId, UUID runId) {

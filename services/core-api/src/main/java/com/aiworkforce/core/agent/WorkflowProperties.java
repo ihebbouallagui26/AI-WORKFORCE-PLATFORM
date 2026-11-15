@@ -14,10 +14,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param maxResultChars             results kept on a run are truncated to this length
  * @param retryBaseDelay             delay before the first automatic retry; it doubles per attempt (with jitter)
  * @param retryMaxDelay              upper bound of any retry delay
+ * @param workerTokenReservation     tokens set aside for each parallel worker when it is dispatched (replaced by its actual usage)
+ * @param maxParallelWorkers         platform cap of concurrent workers of one workflow (never above the C1 organization capacity)
  */
 @ConfigurationProperties(prefix = "app.workflows")
 public record WorkflowProperties(Integer maxOpenRunsPerOrganization, Long maintenanceMs, Duration cancelGrace,
-        Integer maxResultChars, Duration retryBaseDelay, Duration retryMaxDelay) {
+        Integer maxResultChars, Duration retryBaseDelay, Duration retryMaxDelay, Integer workerTokenReservation,
+        Integer maxParallelWorkers) {
 
     public WorkflowProperties {
         maxOpenRunsPerOrganization = maxOpenRunsPerOrganization == null ? 3 : maxOpenRunsPerOrganization;
@@ -26,6 +29,11 @@ public record WorkflowProperties(Integer maxOpenRunsPerOrganization, Long mainte
         maxResultChars = maxResultChars == null ? 20000 : maxResultChars;
         retryBaseDelay = retryBaseDelay == null ? Duration.ofSeconds(5) : retryBaseDelay;
         retryMaxDelay = retryMaxDelay == null ? Duration.ofSeconds(60) : retryMaxDelay;
+        workerTokenReservation = workerTokenReservation == null ? 4000 : workerTokenReservation;
+        maxParallelWorkers = maxParallelWorkers == null ? 3 : maxParallelWorkers;
+        if (workerTokenReservation < 1 || maxParallelWorkers < 1 || maxParallelWorkers > 3) {
+            throw new IllegalArgumentException("app.workflows.worker-token-reservation must be positive and max-parallel-workers between 1 and 3");
+        }
         if (maxOpenRunsPerOrganization < 1 || maxOpenRunsPerOrganization > 50) {
             throw new IllegalArgumentException("app.workflows.max-open-runs-per-organization must be between 1 and 50");
         }

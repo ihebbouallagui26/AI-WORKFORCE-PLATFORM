@@ -75,6 +75,16 @@ public class WorkflowActionService {
      * Seconds left for this execution when it belongs to a workflow: the earlier of its step deadline and the workflow deadline
      * (null for an ordinary execution). The orchestrator must not run past it; the Core API still ends the child itself.
      */
+    /** How many delegations the coordinator may make in one turn (1 = sequential, the C3.2 behaviour); 0 for an execution that is not a coordinator turn. */
+    @Transactional(readOnly = true)
+    public int delegationLimit(UUID organizationId, UUID executionId) {
+        WorkflowStep step = steps.findByOrganizationIdAndExecutionId(organizationId, executionId).orElse(null);
+        if (step == null || !WorkflowScheduler.COORDINATOR.equals(step.getRole())) {
+            return 0;
+        }
+        return runs.findByOrganizationIdAndId(organizationId, step.getRunId()).map(r -> WorkflowSpec.parseSnapshot(r.getSnapshot()).parallelBound()).orElse(1);
+    }
+
     @Transactional(readOnly = true)
     public Long remainingSeconds(UUID organizationId, UUID executionId) {
         WorkflowStep step = steps.findByOrganizationIdAndExecutionId(organizationId, executionId).orElse(null);
@@ -164,7 +174,7 @@ public class WorkflowActionService {
 
     private Object validateDelegate(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep turn, JsonNode args, Instant now) {
         UUID org = run.getOrganizationId();
-        Rejection common = commonChecks(run, turn, now);
+        Rejection common = commonChecks(run, turn, now, false, snapshot.parallelBound());
         if (common != null) {
             return common;
         }
@@ -188,7 +198,9 @@ public class WorkflowActionService {
             return new Rejection("WORKER_ACTIVE", "A worker is still running.");
         }
         long workers = all.stream().filter(s -> !WorkflowScheduler.COORDINATOR.equals(s.getRole()) && s.getAttempt() == 1).count();
-        if (workers >= snapshot.maxSteps()) {
+        // Delegations accepted in THIS turn are not steps yet, but they already count against the capacity.
+        long pendingDelegations = actions.findAcceptedByOrganizationAndExecution(org, turn.getExecutionId()).stream().filter(WorkflowAction::isDelegate).count();
+        if (workers + pendingDelegations >= snapshot.maxSteps()) {
             return new Rejection("STEP_LIMIT", "The maximum number of worker steps is reached.");
         }
         List<Integer> inputs = new ArrayList<>();
@@ -225,7 +237,7 @@ public class WorkflowActionService {
     }
 
     private Object validateFinish(WorkflowRun run, WorkflowStep turn, JsonNode args, Instant now) {
-        Rejection common = commonChecks(run, turn, now);
+        Rejection common = commonChecks(run, turn, now, true, 1);
         if (common != null) {
             return common;
         }
@@ -244,7 +256,7 @@ public class WorkflowActionService {
     }
 
     /** Checks shared by both actions: current turn, run state, one action per turn, deadline, budget, requester. */
-    private Rejection commonChecks(WorkflowRun run, WorkflowStep turn, Instant now) {
+    private Rejection commonChecks(WorkflowRun run, WorkflowStep turn, Instant now, boolean finishing, int delegationBound) {
         if (run.getStatus().isTerminal() || run.getStatus() == WorkflowRunStatus.CANCEL_REQUESTED) {
             return new Rejection("RUN_NOT_ACTIVE", "The workflow is no longer active.");
         }
@@ -252,8 +264,14 @@ public class WorkflowActionService {
         if (latest.isEmpty() || !latest.getFirst().getId().equals(turn.getId())) {
             return new Rejection("NOT_CURRENT_TURN", "This is not the current coordinator turn.");
         }
-        if (actions.findAcceptedByOrganizationAndExecution(run.getOrganizationId(), turn.getExecutionId()).isPresent()) {
-            return new Rejection("ACTION_ALREADY_TAKEN", "This turn already has its action.");
+        List<WorkflowAction> taken = actions.findAcceptedByOrganizationAndExecution(run.getOrganizationId(), turn.getExecutionId());
+        long delegations = taken.stream().filter(WorkflowAction::isDelegate).count();
+        if (taken.stream().anyMatch(a -> !a.isDelegate()) || (finishing && delegations > 0)) {
+            return new Rejection("ACTION_ALREADY_TAKEN", "This turn already has its action (a finish is never combined with delegations).");
+        }
+        if (!finishing && delegations >= delegationBound) {
+            return delegationBound == 1 ? new Rejection("ACTION_ALREADY_TAKEN", "This turn already has its action.")
+                    : new Rejection("GROUP_FULL", "This turn already delegated the maximum number of parallel tasks (" + delegationBound + ").");
         }
         if (!now.isBefore(run.getDeadlineAt())) {
             return new Rejection("DEADLINE_EXCEEDED", "The workflow time limit is reached.");

@@ -61,6 +61,10 @@ public class WorkflowDefinition {
     @Column(name = "step_timeout_seconds")
     private Integer stepTimeoutSeconds;
 
+    /** 1 = sequential (the C3.1 / C3.2 behaviour, default); up to 3 independent workers at once. */
+    @Column(name = "max_parallel_workers", nullable = false)
+    private int maxParallelWorkers = 1;
+
     @Column(name = "max_steps", nullable = false)
     private int maxSteps;
 
@@ -141,6 +145,14 @@ public class WorkflowDefinition {
         bump(now);
     }
 
+    void configureParallelism(Integer maxParallel, Instant now) {
+        requireActive();
+        if (maxParallel != null) {
+            this.maxParallelWorkers = maxParallel;
+        }
+        bump(now);
+    }
+
     /** Failure handling (C3.3). A null argument leaves the value unchanged; stepTimeoutSeconds 0 removes the timeout. */
     void configureReliability(WorkflowFailurePolicy policy, WorkflowRecoveryMode recovery, Integer stepTimeout, Instant now) {
         requireActive();
@@ -198,6 +210,7 @@ public class WorkflowDefinition {
     public WorkflowFailurePolicy getFailurePolicy() { return failurePolicy; }
     public WorkflowRecoveryMode getRecoveryMode() { return recoveryMode; }
     public Integer getStepTimeoutSeconds() { return stepTimeoutSeconds; }
+    public int getMaxParallelWorkers() { return maxParallelWorkers; }
     public String getSteps() { return steps; }
     public int getMaxSteps() { return maxSteps; }
     public int getMaxRetriesPerStep() { return maxRetriesPerStep; }

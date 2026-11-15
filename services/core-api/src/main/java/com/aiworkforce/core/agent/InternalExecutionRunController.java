@@ -38,11 +38,12 @@ public class InternalExecutionRunController {
     public record Started(UUID executionId, UUID agentId, String task,
             @Schema(description = "COORDINATOR when this execution is a workflow coordinator turn, otherwise null") String workflowRole,
             @Schema(description = "Platform-native actions offered ONLY to a coordinator turn (never MCP tools)") List<PlatformAction> platformActions,
-            @Schema(description = "Seconds left (step or workflow deadline) when the execution belongs to a workflow; the orchestrator must not run past it") Long deadlineSeconds) {
+            @Schema(description = "Seconds left (step or workflow deadline) when the execution belongs to a workflow; the orchestrator must not run past it") Long deadlineSeconds,
+            @Schema(description = "Coordinator turns only: how many workflow.delegate calls this turn may make (1 = one task at a time)") Integer maxDelegationsPerTurn) {
 
-        static Started of(StartedExecution started, boolean coordinatorTurn, Long deadlineSeconds) {
+        static Started of(StartedExecution started, boolean coordinatorTurn, Long deadlineSeconds, int delegationLimit) {
             return new Started(started.executionId(), started.agentId(), started.task(), coordinatorTurn ? "COORDINATOR" : null,
-                    coordinatorTurn ? WorkflowActionCatalog.actions() : List.of(), deadlineSeconds);
+                    coordinatorTurn ? WorkflowActionCatalog.actions() : List.of(), deadlineSeconds, coordinatorTurn ? delegationLimit : null);
         }
     }
 
@@ -70,7 +71,8 @@ public class InternalExecutionRunController {
     }
 
     @Schema(name = "FailExecutionRequest")
-    public record FailRequest(@NotBlank @Size(max = 40) String errorCode, @Size(max = 1000) String message) {
+    public record FailRequest(@NotBlank @Size(max = 40) String errorCode, @Size(max = 1000) String message,
+            @Min(0) Integer inputTokens, @Min(0) Integer outputTokens) {
     }
 
     private final ExecutionCoordinator coordinator;
@@ -87,7 +89,7 @@ public class InternalExecutionRunController {
     public Started start(@PathVariable UUID organizationId, @PathVariable UUID executionId) {
         StartedExecution started = coordinator.start(organizationId, executionId);
         return Started.of(started, workflowActions.isCoordinatorTurn(organizationId, executionId),
-                workflowActions.remainingSeconds(organizationId, executionId));
+                workflowActions.remainingSeconds(organizationId, executionId), workflowActions.delegationLimit(organizationId, executionId));
     }
 
     @PostMapping("/credential")
@@ -113,6 +115,6 @@ public class InternalExecutionRunController {
     @Operation(operationId = "failExecutionRun", summary = "Fail the execution with a safe error code and message")
     public ExecutionView fail(@PathVariable UUID organizationId, @PathVariable UUID executionId,
             @Valid @RequestBody FailRequest request) {
-        return coordinator.fail(organizationId, executionId, request.errorCode(), request.message());
+        return coordinator.fail(organizationId, executionId, request.errorCode(), request.message(), request.inputTokens(), request.outputTokens());
     }
 }

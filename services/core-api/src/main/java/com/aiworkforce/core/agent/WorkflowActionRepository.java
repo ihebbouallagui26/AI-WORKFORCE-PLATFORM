@@ -16,8 +16,10 @@ interface WorkflowActionRepository extends JpaRepository<WorkflowAction, UUID> {
 
     Optional<WorkflowAction> findByOrganizationIdAndExecutionIdAndToolCallId(UUID organizationId, UUID executionId, String toolCallId);
 
-    @Query("select a from WorkflowAction a where a.organizationId = :organizationId and a.executionId = :executionId and a.status = 'ACCEPTED'")
-    Optional<WorkflowAction> findAcceptedByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
+    /** The accepted actions of one coordinator turn, in the order they were accepted (several delegations, or one finish). */
+    @Query("select a from WorkflowAction a where a.organizationId = :organizationId and a.executionId = :executionId and a.status = 'ACCEPTED' "
+            + "order by a.createdAt, a.id")
+    List<WorkflowAction> findAcceptedByOrganizationAndExecution(@Param("organizationId") UUID organizationId,
             @Param("executionId") UUID executionId);
 
     Page<WorkflowAction> findByOrganizationIdAndRunId(UUID organizationId, UUID runId, Pageable pageable);

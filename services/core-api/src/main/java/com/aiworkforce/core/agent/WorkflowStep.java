@@ -43,8 +43,15 @@ public class WorkflowStep {
     @Column(nullable = false, updatable = false)
     private String role;
 
-    @Column(name = "execution_id", nullable = false, updatable = false)
+    /** Null only while the step is QUEUED (or was cancelled before it ever ran): the child execution is created at dispatch. */
+    @Column(name = "execution_id")
     private UUID executionId;
+
+    @Column(name = "group_no")
+    private Integer groupNo;
+
+    @Column(name = "reserved_tokens", nullable = false)
+    private int reservedTokens;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -84,7 +91,7 @@ public class WorkflowStep {
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
 
-    @Column(name = "deadline_at", updatable = false)
+    @Column(name = "deadline_at")
     private Instant deadlineAt;
 
     @Column(name = "retry_requested_by")
@@ -121,6 +128,41 @@ public class WorkflowStep {
         this.createdAt = now;
         this.startedAt = now;
         this.updatedAt = now;
+    }
+
+    /** Accepted work waiting for a child execution: persisted BEFORE anything is dispatched. */
+    static WorkflowStep queued(UUID id, UUID organizationId, UUID runId, int stepRank, String name, UUID agentId, String inputRanks,
+            int groupNo, Instant now) {
+        WorkflowStep step = new WorkflowStep(id, organizationId, runId, stepRank, 1, name, agentId, null, inputRanks, "WORKER", now);
+        step.status = WorkflowStepStatus.QUEUED;
+        step.startedAt = null;
+        step.groupNo = groupNo;
+        return step;
+    }
+
+    /** The scheduler gave this queued step its child execution (and reserved budget for it). */
+    void dispatched(UUID executionId, int reserved, Instant stepDeadline, Instant now) {
+        this.executionId = executionId;
+        this.status = WorkflowStepStatus.RUNNING;
+        this.reservedTokens = reserved;
+        this.deadlineAt = stepDeadline;
+        this.startedAt = now;
+        this.updatedAt = now;
+    }
+
+    void reserved(int tokens) {
+        this.reservedTokens = tokens;
+    }
+
+    /** Gives the reservation back (once: the actual usage replaces it) and returns how much it was. */
+    int releaseReservation() {
+        int released = reservedTokens;
+        reservedTokens = 0;
+        return released;
+    }
+
+    void inGroup(Integer group) {
+        this.groupNo = group;
     }
 
     /** How this attempt was launched and when it must end (null = only the workflow deadline applies). */
@@ -194,6 +236,8 @@ public class WorkflowStep {
     public UUID getAgentId() { return agentId; }
     public String getRole() { return role; }
     public UUID getExecutionId() { return executionId; }
+    public Integer getGroupNo() { return groupNo; }
+    public int getReservedTokens() { return reservedTokens; }
     public WorkflowStepStatus getStatus() { return status; }
     public String getInputRanks() { return inputRanks; }
     public String getResultSummary() { return resultSummary; }

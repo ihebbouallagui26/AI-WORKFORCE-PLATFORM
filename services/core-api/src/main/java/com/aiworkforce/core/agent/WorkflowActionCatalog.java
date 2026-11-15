@@ -19,7 +19,8 @@ final class WorkflowActionCatalog {
     static List<PlatformAction> actions() {
         return List.of(
                 new PlatformAction(WorkflowAction.DELEGATE,
-                        "Give ONE task to ONE worker of this workflow. The worker runs next, alone, and its result comes back to you.",
+                        "Give ONE task to ONE worker of this workflow. Independent tasks may be delegated by calling this action several times in the same turn "
+                                + "when the platform allows it: those workers run at the same time and all their results come back to you together.",
                         schema("{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"participantRef\",\"task\"],"
                                 + "\"properties\":{\"participantRef\":{\"type\":\"string\",\"description\":\"The worker ref, e.g. worker_1\"},"
                                 + "\"task\":{\"type\":\"string\",\"maxLength\":1500,\"description\":\"What the worker must do\"},"

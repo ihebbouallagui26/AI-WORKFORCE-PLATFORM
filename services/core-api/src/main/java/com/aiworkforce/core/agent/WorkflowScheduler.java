@@ -101,6 +101,10 @@ class WorkflowScheduler {
         Instant now = Instant.now(clock);
         UUID org = run.getOrganizationId();
         WorkflowSpec.Snapshot snapshot = WorkflowSpec.parseSnapshot(run.getSnapshot());
+        if (snapshot.parallel() && groupPhase(run, snapshot)) {
+            advanceParallel(run, snapshot, now);
+            return;
+        }
         WorkflowStep current = latest(run);
         AgentExecution execution = current == null ? null
                 : executions.lockByOrganizationAndId(org, current.getExecutionId()).orElse(null);
@@ -345,8 +349,8 @@ class WorkflowScheduler {
 
     /** The coordinator turn ended: what it decided is in the Core API's record of ITS accepted action, nothing else counts. */
     private void afterCoordinatorTurn(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep turn, Instant now) {
-        WorkflowAction action = actions.findAcceptedByOrganizationAndExecution(run.getOrganizationId(), turn.getExecutionId()).orElse(null);
-        if (action == null) {
+        List<WorkflowAction> accepted = actions.findAcceptedByOrganizationAndExecution(run.getOrganizationId(), turn.getExecutionId());
+        if (accepted.isEmpty()) {
             // The turn ended without an accepted control action. One bounded correction; a second silent turn fails the run.
             if (previousTurnWithoutAction(run, turn)) {
                 failRun(run, COORDINATOR_NO_ACTION, "The coordinator did not choose an action after being asked twice.", now);
@@ -357,9 +361,19 @@ class WorkflowScheduler {
             scheduleCoordinatorTurn(run, snapshot, true, run.getNextRank(), 1, now);
             return;
         }
-        if (action.isDelegate()) {
-            if (action.getResultStepId() == null) {
-                scheduleWorker(run, snapshot, action, run.getNextRank(), 1, now);
+        WorkflowAction action = accepted.stream().filter(a -> !a.isDelegate()).findFirst().orElse(null);
+        if (action == null) {
+            List<WorkflowAction> pending = accepted.stream().filter(a -> a.getResultStepId() == null).toList();
+            if (pending.isEmpty()) {
+                return; // already created: the group phase handles it
+            }
+            if (snapshot.parallel()) {
+                createGroup(run, snapshot, turn, pending, now); // ALL accepted delegations are persisted together before any dispatch
+                if (!run.getStatus().isTerminal()) {
+                    advanceParallel(run, snapshot, now);
+                }
+            } else {
+                scheduleWorker(run, snapshot, pending.getFirst(), run.getNextRank(), 1, now);
             }
         } else {
             run.succeed(WorkflowText.bounded(action.getResult(), properties.maxResultChars()), now);
@@ -416,7 +430,7 @@ class WorkflowScheduler {
         }
         String task = WorkflowText.composeCoordinatorTask(run.getObjective(), snapshot.members(), results, turns + (attempt == 1 ? 1 : 0),
                 snapshot.maxSteps() + 1, workerSteps, snapshot.maxSteps(), run.getTokenBudget() - run.getTokensUsed(),
-                remainingSeconds(run, now), corrective);
+                remainingSeconds(run, now), corrective, snapshot.parallelBound());
         WorkflowSpec.Member self = snapshot.memberOf(snapshot.coordinatorAgentId());
         WorkflowStep step = launchStep(run, rank, attempt, "Coordinator turn " + (turns + (attempt == 1 ? 1 : 0)),
                 snapshot.coordinatorAgentId(), task, "", COORDINATOR, now);
@@ -476,6 +490,400 @@ class WorkflowScheduler {
         return null;
     }
 
+
+    // ------------------------------------------------------------------ PARALLEL groups (C3.4)
+
+    private static boolean isLive(WorkflowStep s) {
+        return s.getStatus() == WorkflowStepStatus.RUNNING || s.getStatus() == WorkflowStepStatus.WAITING_APPROVAL;
+    }
+
+    /** A pipeline with parallel stages is always in group phase; a coordinated run only while a group of workers is in flight. */
+    private boolean groupPhase(WorkflowRun run, WorkflowSpec.Snapshot snapshot) {
+        if (!snapshot.coordinated()) {
+            return true;
+        }
+        WorkflowStep last = latest(run);
+        return last != null && !COORDINATOR.equals(last.getRole());
+    }
+
+    /**
+     * One scheduler pass over a GROUP of concurrent workers (a pipeline stage, or the workers of one coordinator turn). Everything
+     * is decided from PostgreSQL with the run row locked, so the pass is idempotent and two schedulers cannot both dispatch. Order:
+     * workflow end (deadline, cancellation, step time limits) &rarr; settle finished children &rarr; abort siblings on a failure
+     * the policy does not allow to continue past &rarr; dispatch queued work and due retries within the concurrency, capacity and
+     * budget bounds &rarr; fan-in (only when EVERY rank of the group is resolved) &rarr; next stage or next coordinator turn.
+     */
+    private void advanceParallel(WorkflowRun run, WorkflowSpec.Snapshot snapshot, Instant now) {
+        if (run.getStatus().isTerminal()) {
+            return; // a terminal run creates and dispatches nothing (e.g. a stage that could not even be queued)
+        }
+        UUID org = run.getOrganizationId();
+        List<WorkflowStep> all = new ArrayList<>(steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(org, run.getId()));
+        Map<UUID, AgentExecution> execs = new HashMap<>();
+        for (WorkflowStep s : all) {
+            if (isLive(s)) {
+                executions.lockByOrganizationAndId(org, s.getExecutionId()).ifPresent(e -> execs.put(s.getId(), e));
+            }
+        }
+        boolean timedOut = !now.isBefore(run.getDeadlineAt());
+        boolean cancelling = run.getStatus() == WorkflowRunStatus.CANCEL_REQUESTED;
+
+        // 1. Ends imposed on every child: the workflow deadline, a cancellation, or the step's own time limit.
+        for (WorkflowStep s : all) {
+            if (s.getStatus() == WorkflowStepStatus.QUEUED) {
+                if (timedOut || cancelling) {
+                    cancelQueued(s, timedOut ? TIMEOUT_CODE : CANCELLED_CODE, "Cancelled before it started.", now);
+                }
+                continue;
+            }
+            AgentExecution e = execs.get(s.getId());
+            if (!isLive(s) || e == null || e.getStatus().isTerminal()) {
+                continue;
+            }
+            if (timedOut) {
+                stopChild(e, TIMEOUT_CODE, "The workflow exceeded its total time limit.");
+            } else if (cancelling) {
+                requestStop(run, e, run.getCancelRequestedAt() == null ? now : run.getCancelRequestedAt(), now);
+            } else if (s.getDeadlineAt() != null && !now.isBefore(s.getDeadlineAt())) {
+                stopChild(e, STEP_TIMEOUT, "The step exceeded its time limit.");
+            }
+        }
+        settleLive(run, all, execs, now);
+        if (timedOut) {
+            run.timeout(now);
+            append(run, null, WorkflowMessageKind.STATUS, "The workflow ended: total time limit reached.", now);
+            audit(run, "workflow.run.timeout");
+            return;
+        }
+        if (cancelling) {
+            if (all.stream().noneMatch(WorkflowScheduler::isLive)) {
+                run.cancelled(null, now);
+                append(run, null, WorkflowMessageKind.STATUS, "The workflow was cancelled. Started steps are not undone.", now);
+                audit(run, "workflow.run.cancelled");
+            }
+            return;
+        }
+
+        // 2. The group in flight.
+        int group = all.stream().filter(s -> !COORDINATOR.equals(s.getRole()) && s.getGroupNo() != null)
+                .mapToInt(WorkflowStep::getGroupNo).max().orElse(0);
+        Map<Integer, WorkflowStep> latestByRank = new java.util.TreeMap<>();
+        for (WorkflowStep s : all) {
+            if (!COORDINATOR.equals(s.getRole()) && s.getGroupNo() != null && s.getGroupNo() == group) {
+                latestByRank.put(s.getStepRank(), s); // attempts are ordered: the last one of a rank is the one that counts
+            }
+        }
+        if (group == 0 && snapshot.coordinated()) {
+            return; // nothing to do: the coordinator has not delegated a group yet
+        }
+        if (group == 0) {
+            openStage(run, snapshot, snapshot.stageNumbers().getFirst(), now);
+            advanceParallel(run, snapshot, now);
+            return;
+        }
+
+        // 3. FAIL_FAST / RETRY: a failure the policy does not continue past ends the siblings and, once all are resolved, the run.
+        List<WorkflowStep> failed = latestByRank.values().stream()
+                .filter(s -> s.getStatus() == WorkflowStepStatus.FAILED && s.getNextAttemptAt() == null).toList();
+        WorkflowStep trigger = failed.stream().filter(f -> snapshot.policy() != WorkflowFailurePolicy.CONTINUE || !continuable(f)).findFirst().orElse(null);
+        if (trigger != null) {
+            Instant since = trigger.getCompletedAt() == null ? now : trigger.getCompletedAt();
+            for (WorkflowStep s : latestByRank.values()) {
+                if (s.getStatus() == WorkflowStepStatus.QUEUED) {
+                    cancelQueued(s, CANCELLED_CODE, "Cancelled because step " + trigger.getStepRank() + " failed.", now);
+                } else if (s.getStatus() == WorkflowStepStatus.FAILED && s.getNextAttemptAt() != null) {
+                    s.retryDueAt(null, null, now); // a pending retry of a sibling is dropped
+                }
+            }
+            for (WorkflowStep s : all) {
+                AgentExecution e = execs.get(s.getId());
+                if (isLive(s) && e != null && !e.getStatus().isTerminal()) {
+                    requestStop(run, e, since, now); // grace for a tool call in flight, then OUTCOME_UNKNOWN: never "cancelled"
+                }
+            }
+            settleLive(run, all, execs, now);
+            if (all.stream().noneMatch(WorkflowScheduler::isLive)) {
+                failStep(run, trigger, now);
+            }
+            return;
+        }
+        aggregateStatus(run, all, now);
+
+        // 4. Dispatch queued work and due retries within the bounds.
+        int cap = Math.min(snapshot.parallelBound(), properties.maxParallelWorkers());
+        long active = all.stream().filter(WorkflowScheduler::isLive).count();
+        List<WorkflowStep> queued = latestByRank.values().stream().filter(s -> s.getStatus() == WorkflowStepStatus.QUEUED).toList();
+        List<WorkflowStep> due = latestByRank.values().stream().filter(s -> s.getStatus() == WorkflowStepStatus.FAILED
+                && s.getNextAttemptAt() != null && !now.isBefore(s.getNextAttemptAt())).toList();
+        if ((!queued.isEmpty() || !due.isEmpty())) {
+            if (!requesterAuthorized(run)) {
+                endEverything(run, all, execs, REQUESTER_NOT_AUTHORIZED, "The person who started the workflow can no longer run it.", now);
+                return;
+            }
+            List<WorkflowAction> delegations = snapshot.coordinated()
+                    ? actions.findByOrganizationIdAndRunIdOrderByCreatedAtAsc(org, run.getId()) : List.of();
+            for (WorkflowStep s : queued) {
+                if (active >= cap) {
+                    break;
+                }
+                int reserve = tryReserve(run);
+                if (reserve < 0) {
+                    break;
+                }
+                DispatchResult result = dispatchQueued(run, snapshot, s, all, delegations, reserve, now);
+                if (result == DispatchResult.NOT_RUNNABLE) {
+                    endEverything(run, all, execs, STEP_NOT_RUNNABLE, "Step " + s.getStepRank() + " cannot run: its agent is not available.", now);
+                    return;
+                }
+                if (result == DispatchResult.NO_CAPACITY) {
+                    break;
+                }
+                active++;
+            }
+            for (WorkflowStep s : due) {
+                if (active >= cap) {
+                    break;
+                }
+                int reserve = tryReserve(run);
+                if (reserve < 0) {
+                    break;
+                }
+                int attempt = s.getAttempt() + 1;
+                relaunch(run, snapshot, s, false, now);
+                if (run.getStatus().isTerminal()) {
+                    endEverything(run, all, execs, run.getErrorCode(), run.getErrorMessage(), now);
+                    return;
+                }
+                WorkflowStep created = steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(org, run.getId()).stream()
+                        .filter(x -> x.getStepRank() == s.getStepRank() && x.getAttempt() == attempt).findFirst().orElse(null);
+                if (created == null) {
+                    break; // the organization is at its execution limit: the retry stays due and the next pass tries again
+                }
+                created.inGroup(s.getGroupNo());
+                created.reserved(reserve);
+                run.reserve(reserve);
+                active++;
+            }
+            // Nothing running, nothing could start, and the budget is the reason: the run cannot go on.
+            boolean stillQueued = latestByRank.values().stream().anyMatch(s -> s.getStatus() == WorkflowStepStatus.QUEUED);
+            if (stillQueued && active == 0 && tryReserve(run) < 0) {
+                endEverything(run, all, execs, TOKEN_BUDGET_EXCEEDED, "The token budget of the workflow is used up.", now);
+                return;
+            }
+        }
+
+        // 5. Fan-in: only when EVERY rank of the group is resolved (no queued, running or retry-pending worker).
+        boolean unresolved = latestByRank.values().stream().anyMatch(s -> s.getStatus() == WorkflowStepStatus.QUEUED || isLive(s)
+                || (s.getStatus() == WorkflowStepStatus.FAILED && s.getNextAttemptAt() != null));
+        if (unresolved) {
+            return;
+        }
+        aggregateStatus(run, all, now);
+        if (snapshot.coordinated()) {
+            scheduleCoordinatorTurn(run, snapshot, false, run.getNextRank(), 1, now); // the coordinator receives ALL results and failures
+            return;
+        }
+        List<Integer> stages = snapshot.stageNumbers();
+        int index = stages.indexOf(group);
+        if (index == stages.size() - 1) {
+            finishPipelineWith(run, latestByRank.values().stream().filter(s -> s.getStatus() == WorkflowStepStatus.SUCCEEDED).toList(), now);
+        } else {
+            openStage(run, snapshot, stages.get(index + 1), now);
+            advanceParallel(run, snapshot, now);
+        }
+    }
+
+    private enum DispatchResult { STARTED, NO_CAPACITY, NOT_RUNNABLE }
+
+    /** A failure CONTINUE may go past (never a revoked permission or a workflow limit). */
+    private static boolean continuable(WorkflowStep failed) {
+        FailureCategory c = failed.getFailureCategory();
+        return c != FailureCategory.AUTHORIZATION_FAILURE && c != FailureCategory.WORKFLOW_LIMIT_EXCEEDED;
+    }
+
+    private void cancelQueued(WorkflowStep s, String code, String message, Instant now) {
+        s.cancelled(code, message, now);
+        s.classified(new WorkflowFailureClassifier.Failure(FailureCategory.WORKFLOW_LIMIT_EXCEEDED, true));
+    }
+
+    private void settleLive(WorkflowRun run, List<WorkflowStep> all, Map<UUID, AgentExecution> execs, Instant now) {
+        for (WorkflowStep s : all) {
+            if (!isLive(s)) {
+                continue;
+            }
+            AgentExecution e = execs.get(s.getId());
+            if (e == null || e.getStatus().isTerminal()) {
+                settle(run, s, e, now);
+            } else {
+                s.mirrorWaiting(e.getStatus() == ExecutionStatus.WAITING_APPROVAL, now);
+            }
+        }
+    }
+
+    /** The run is WAITING_APPROVAL only while every live worker waits for a person; RUNNING as soon as one works or is queued. */
+    private void aggregateStatus(WorkflowRun run, List<WorkflowStep> all, Instant now) {
+        if (run.getStatus().isTerminal() || run.getStatus() == WorkflowRunStatus.CANCEL_REQUESTED) {
+            return;
+        }
+        boolean working = all.stream().anyMatch(s -> s.getStatus() == WorkflowStepStatus.RUNNING || s.getStatus() == WorkflowStepStatus.QUEUED);
+        boolean waiting = all.stream().anyMatch(s -> s.getStatus() == WorkflowStepStatus.WAITING_APPROVAL);
+        if (working || !waiting) {
+            run.markRunning(now);
+        } else {
+            run.markWaitingApproval(now);
+        }
+    }
+
+    /**
+     * Token reservation (atomic: the run row is locked). A worker may only start if some budget is neither spent nor reserved; it
+     * reserves the configured amount, or what is left if that is less. The reservation is replaced by actual usage when it ends.
+     * Returns -1 when nothing can be reserved now.
+     */
+    private int tryReserve(WorkflowRun run) {
+        int available = run.getTokenBudget() - run.getTokensUsed() - run.getReservedTokens();
+        if (available < Math.min(MIN_TOKEN_RESERVE, properties.workerTokenReservation())) {
+            return -1;
+        }
+        return Math.min(properties.workerTokenReservation(), available);
+    }
+
+    /** Ends the group because the run cannot go on: queued work is cancelled, live children are stopped (a tool in flight is UNKNOWN), the run fails. */
+    private void endEverything(WorkflowRun run, List<WorkflowStep> all, Map<UUID, AgentExecution> execs, String code, String message, Instant now) {
+        for (WorkflowStep s : all) {
+            if (s.getStatus() == WorkflowStepStatus.QUEUED) {
+                cancelQueued(s, CANCELLED_CODE, "Cancelled: " + message, now);
+            }
+        }
+        for (WorkflowStep s : all) {
+            AgentExecution e = execs.get(s.getId());
+            if (isLive(s) && e != null) {
+                stopChild(e, CANCELLED_CODE, "The workflow ended: " + message);
+            }
+        }
+        settleLive(run, all, execs, now);
+        if (!run.getStatus().isTerminal()) {
+            failRun(run, code, message, now);
+        }
+    }
+
+    /** Persists a pipeline stage as QUEUED work BEFORE anything is dispatched (one transaction: all of it or none). */
+    private void openStage(WorkflowRun run, WorkflowSpec.Snapshot snapshot, int stageNo, Instant now) {
+        for (WorkflowSpec.Step definition : snapshot.stage(stageNo)) {
+            if (!snapshot.participants().contains(definition.agentId())) {
+                failRun(run, STEP_NOT_RUNNABLE, "The agent of step " + definition.rank() + " is not a participant of this workflow.", now);
+                return;
+            }
+            steps.save(WorkflowStep.queued(UUID.randomUUID(), run.getOrganizationId(), run.getId(), definition.rank(), definition.name(),
+                    definition.agentId(), definition.inputsFrom().toString().replaceAll("[\\[\\] ]", ""), stageNo, now));
+            run.scheduled(definition.rank());
+        }
+        append(run, null, WorkflowMessageKind.STATUS, "Stage " + stageNo + " opened: " + snapshot.stage(stageNo).size() + " step(s) queued.", now);
+    }
+
+    /** Persists the accepted delegations of a coordinator turn as ONE group of QUEUED workers (atomic), then links each action. */
+    private void createGroup(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep turn, List<WorkflowAction> delegations, Instant now) {
+        int rank = run.getNextRank();
+        for (WorkflowAction a : delegations) {
+            WorkflowSpec.Member member = snapshot.memberOf(a.getWorkerAgentId());
+            if (member == null || member.coordinator()) {
+                failRun(run, STEP_NOT_RUNNABLE, "The delegated agent is not a worker of this workflow.", now);
+                return;
+            }
+            WorkflowStep queued = steps.save(WorkflowStep.queued(UUID.randomUUID(), run.getOrganizationId(), run.getId(), rank, member.name(),
+                    member.agentId(), a.getInputRanks(), turn.getStepRank(), now));
+            a.linkStep(queued.getId());
+            run.scheduled(rank);
+            rank++;
+        }
+        append(run, turn.getStepRank(), WorkflowMessageKind.STATUS, "The coordinator delegated " + delegations.size()
+                + " task(s) to run in parallel: queued.", now);
+    }
+
+    /**
+     * Gives one queued step its child execution (the C1 path: agent ACTIVE, provider, open-execution limit) and the token reservation.
+     * Dispatch is "accepted and handed over", never proof of execution: the step is RUNNING only in the sense that its child exists.
+     */
+    private DispatchResult dispatchQueued(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep step, List<WorkflowStep> all,
+            List<WorkflowAction> delegations, int reserve, Instant now) {
+        UUID org = run.getOrganizationId();
+        String task;
+        if (snapshot.coordinated()) {
+            WorkflowAction action = delegations.stream().filter(a -> step.getId().equals(a.getResultStepId())).findFirst().orElse(null);
+            WorkflowSpec.Member member = snapshot.memberOf(step.getAgentId());
+            if (action == null || member == null) {
+                return DispatchResult.NOT_RUNNABLE;
+            }
+            Map<Integer, String> inputs = new java.util.LinkedHashMap<>();
+            for (String raw : action.getInputRanks().isBlank() ? new String[0] : action.getInputRanks().split(",")) {
+                int from = Integer.parseInt(raw.strip());
+                all.stream().filter(s -> s.getStepRank() == from && s.getStatus() == WorkflowStepStatus.SUCCEEDED).findFirst()
+                        .ifPresent(s -> inputs.put(from, WorkflowText.bounded(s.getResultSummary(), 1500)));
+            }
+            task = WorkflowText.composeDelegatedTask(run.getObjective(), member.name(), action.getTask(), inputs,
+                    run.getTokenBudget() - run.getTokensUsed(), remainingSeconds(run, now));
+        } else {
+            WorkflowSpec.Step definition = snapshot.steps().get(step.getStepRank() - 1);
+            Map<Integer, String> summaries = new HashMap<>();
+            Map<Integer, String> names = new HashMap<>();
+            for (WorkflowStep done : all) {
+                if (done.getStatus() == WorkflowStepStatus.SUCCEEDED) {
+                    summaries.put(done.getStepRank(), done.getResultSummary());
+                    names.put(done.getStepRank(), done.getName());
+                } else if (done.getStatus() == WorkflowStepStatus.FAILED && !summaries.containsKey(done.getStepRank())) {
+                    summaries.put(done.getStepRank(), "[This step FAILED (" + done.getFailureCategory() + "). No result is available.]");
+                    names.put(done.getStepRank(), done.getName());
+                }
+            }
+            task = WorkflowText.composeTask(run.getObjective(), definition.rank(), run.getTotalSteps(), definition.name(),
+                    definition.instruction(), definition.inputsFrom(), summaries, names, run.getTokenBudget() - run.getTokensUsed(),
+                    remainingSeconds(run, now));
+        }
+        AgentExecution execution;
+        try {
+            execution = executionService.launch(org, step.getAgentId(), run.getRequestedBy(), task);
+        } catch (CapacityExceededException e) {
+            return DispatchResult.NO_CAPACITY; // stays QUEUED: persisted work, dispatched by a later pass
+        } catch (ConflictException | ResourceNotFoundException e) {
+            return DispatchResult.NOT_RUNNABLE;
+        }
+        Integer stepTimeout = snapshot.stepTimeoutSeconds();
+        Instant stepDeadline = stepTimeout == null ? null : java.util.Collections.min(List.of(now.plusSeconds(stepTimeout), run.getDeadlineAt()));
+        step.dispatched(execution.getId(), reserve, stepDeadline, now);
+        run.reserve(reserve);
+        run.markRunning(now);
+        append(run, step.getStepRank(), WorkflowMessageKind.ASSIGNMENT, "Step " + step.getStepRank() + " (" + step.getName() + ") dispatched in parallel.", now);
+        audit.record(org, run.getRequestedBy(), "workflow.step.started", "workflow", run.getId(), AgentSupport.details(
+                "workflowRunId", run.getId(), "step", step.getStepRank(), "attempt", 1, "role", "WORKER", "agentId", step.getAgentId(),
+                "executionId", execution.getId(), "reason", "INITIAL", "group", step.getGroupNo(), "reservedTokens", reserve));
+        return DispatchResult.STARTED;
+    }
+
+    /** End of a pipeline with parallel stages: SUCCEEDED only when every rank has a successful attempt, otherwise truthfully FAILED. */
+    private void finishPipelineWith(WorkflowRun run, List<WorkflowStep> lastStageSucceeded, Instant now) {
+        Set<Integer> done = new java.util.HashSet<>();
+        for (WorkflowStep s : steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(run.getOrganizationId(), run.getId())) {
+            if (s.getStatus() == WorkflowStepStatus.SUCCEEDED) {
+                done.add(s.getStepRank());
+            }
+        }
+        int failed = run.getTotalSteps() - done.size();
+        if (failed > 0) {
+            failRun(run, PARTIAL_FAILURE, failed + " of " + run.getTotalSteps() + " steps failed: the results of the others are kept.", now);
+            return;
+        }
+        StringBuilder result = new StringBuilder();
+        for (WorkflowStep s : lastStageSucceeded) {
+            String text = executions.findByOrganizationIdAndId(run.getOrganizationId(), s.getExecutionId()).map(AgentExecution::getResult).orElse(s.getResultSummary());
+            if (lastStageSucceeded.size() > 1) {
+                result.append("--- Step ").append(s.getStepRank()).append(" (").append(s.getName()).append(") ---\n");
+            }
+            result.append(text).append("\n");
+        }
+        run.succeed(WorkflowText.bounded(result.toString(), properties.maxResultChars()), now);
+        append(run, null, WorkflowMessageKind.STATUS, "The workflow succeeded.", now);
+        audit(run, "workflow.run.succeeded");
+    }
+
     // ------------------------------------------------------------------ shared launching and checks
 
     /** Budget and authorization checks before anything new starts. Fails the run and returns false when they do not hold. */
@@ -489,9 +897,13 @@ class WorkflowScheduler {
     }
 
     /** Authorization is checked again before EVERY step: workflow.execute never replaces agent.execute. */
-    private boolean requesterStillAuthorized(WorkflowRun run, Instant now) {
+    private boolean requesterAuthorized(WorkflowRun run) {
         OrganizationAccess requester = access.findActiveAccess(run.getOrganizationId(), run.getRequestedBy()).orElse(null);
-        if (requester == null || !requester.has(Permission.WORKFLOW_EXECUTE) || !requester.has(Permission.AGENT_EXECUTE)) {
+        return requester != null && requester.has(Permission.WORKFLOW_EXECUTE) && requester.has(Permission.AGENT_EXECUTE);
+    }
+
+    private boolean requesterStillAuthorized(WorkflowRun run, Instant now) {
+        if (!requesterAuthorized(run)) {
             failRun(run, REQUESTER_NOT_AUTHORIZED, "The person who started the workflow can no longer run it.", now);
             return false;
         }
@@ -547,6 +959,7 @@ class WorkflowScheduler {
     // ------------------------------------------------------------------ settling a step from its execution
 
     private void settle(WorkflowRun run, WorkflowStep step, AgentExecution execution, Instant now) {
+        run.release(step.releaseReservation()); // the reservation is replaced by the actual usage, once
         if (execution == null) {
             step.fail("EXECUTION_MISSING", "The execution of this step is missing.", now);
             return;
@@ -633,9 +1046,14 @@ class WorkflowScheduler {
      * from its next call to the Core API.
      */
     private void requestStop(WorkflowRun run, AgentExecution execution, Instant now) {
+        requestStop(run, execution, run.getCancelRequestedAt() == null ? now : run.getCancelRequestedAt(), now);
+    }
+
+    /** {@code since}: when the stop was asked for (the grace period for a tool call in flight counts from there). */
+    private void requestStop(WorkflowRun run, AgentExecution execution, Instant since, Instant now) {
         boolean toolInFlight = execution.getStatus() == ExecutionStatus.RUNNING
                 && invocations.existsRunningByOrganizationAndExecution(run.getOrganizationId(), execution.getId());
-        Instant cancelledAt = run.getCancelRequestedAt() == null ? now : run.getCancelRequestedAt();
+        Instant cancelledAt = since;
         if (toolInFlight && now.isBefore(cancelledAt.plus(properties.cancelGrace()))) {
             return;
         }

@@ -41,10 +41,11 @@ public class WorkflowDefinitionService {
     private final TenantAccessService access;
     private final AuditLog audit;
     private final Clock clock;
+    private final WorkflowProperties properties;
 
     public WorkflowDefinitionService(WorkflowDefinitionRepository definitions, WorkflowParticipantRepository participants,
             AgentRepository agents, AgentSupport support, ExecutionService executionService, TenantAccessService access,
-            AuditLog audit, Clock clock) {
+            AuditLog audit, Clock clock, WorkflowProperties properties) {
         this.definitions = definitions;
         this.participants = participants;
         this.agents = agents;
@@ -53,12 +54,14 @@ public class WorkflowDefinitionService {
         this.access = access;
         this.audit = audit;
         this.clock = clock;
+        this.properties = properties;
     }
 
     @Transactional
     public DefinitionView create(UUID organizationId, AuthenticatedUser user, String name, String description, Integer maxSteps,
             Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds, WorkflowMode mode,
-            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds) {
+            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds,
+            Integer maxParallelWorkers) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = new WorkflowDefinition(UUID.randomUUID(), organizationId, cleanName(name),
                 description == null ? "" : description.strip(), limit(maxSteps, 8, 1, WorkflowSpec.MAX_STEPS, "maxSteps"),
@@ -67,6 +70,9 @@ public class WorkflowDefinitionService {
                 limit(deadlineSeconds, DEFAULT_DEADLINE_SECONDS, 30, 86_400, "deadlineSeconds"), user.userId(),
                 mode == null ? WorkflowMode.PIPELINE : mode, Instant.now(clock));
         definition.configureReliability(failurePolicy, recoveryMode, stepTimeoutSeconds, Instant.now(clock));
+        if (maxParallelWorkers != null) {
+            definition.configureParallelism(parallelBound(maxParallelWorkers), Instant.now(clock));
+        }
         checkReliability(definition);
         definitions.save(definition);
         audit.record(organizationId, user.userId(), "workflow.created", "workflow", definition.getId(),
@@ -89,7 +95,8 @@ public class WorkflowDefinitionService {
     @Transactional
     public DefinitionView update(UUID organizationId, UUID id, AuthenticatedUser user, String name, String description,
             Integer maxSteps, Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds,
-            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds) {
+            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode, Integer stepTimeoutSeconds,
+            Integer maxParallelWorkers) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = lock(organizationId, id);
         if (maxSteps != null && WorkflowSpec.parseSteps(definition.getSteps()).size() > limit(maxSteps, 8, 1, WorkflowSpec.MAX_STEPS, "maxSteps")) {
@@ -103,6 +110,15 @@ public class WorkflowDefinitionService {
                 Instant.now(clock));
         if (failurePolicy != null || recoveryMode != null || stepTimeoutSeconds != null) {
             definition.configureReliability(failurePolicy, recoveryMode, stepTimeoutSeconds, Instant.now(clock));
+        }
+        if (maxParallelWorkers != null) {
+            int bound = parallelBound(maxParallelWorkers);
+            long widest = WorkflowSpec.parseSteps(definition.getSteps()).stream()
+                    .collect(Collectors.groupingBy(WorkflowSpec.Step::stageOrRank, Collectors.counting())).values().stream().mapToLong(Long::longValue).max().orElse(1);
+            if (widest > bound) {
+                throw new ConflictException("A stage already holds more parallel steps than this bound: change the steps first.");
+            }
+            definition.configureParallelism(bound, Instant.now(clock));
         }
         checkReliability(definition);
         audit.record(organizationId, user.userId(), "workflow.updated", "workflow", id, AgentSupport.details("version", definition.getVersion()));
@@ -174,7 +190,7 @@ public class WorkflowDefinitionService {
         }
         Set<UUID> participantAgents = participants.findByOrganizationIdAndDefinitionId(organizationId, id).stream()
                 .map(WorkflowParticipant::getAgentId).collect(Collectors.toSet());
-        List<WorkflowSpec.Step> steps = WorkflowSpec.normalize(submitted, participantAgents, definition.getMaxSteps());
+        List<WorkflowSpec.Step> steps = WorkflowSpec.normalize(submitted, participantAgents, definition.getMaxSteps(), definition.getMaxParallelWorkers());
         definition.replaceSteps(WorkflowSpec.toJson(steps), Instant.now(clock));
         audit.record(organizationId, user.userId(), "workflow.steps.updated", "workflow", id,
                 AgentSupport.details("steps", steps.size(), "version", definition.getVersion()));
@@ -209,7 +225,17 @@ public class WorkflowDefinitionService {
     }
 
     /** RETRY needs retries to retry with; a manual recovery makes no sense when failures are continued past. */
+    private int parallelBound(int requested) {
+        if (requested < 1 || requested > properties.maxParallelWorkers()) {
+            throw new BadRequestException("maxParallelWorkers must be between 1 and " + properties.maxParallelWorkers() + ".");
+        }
+        return requested;
+    }
+
     private static void checkReliability(WorkflowDefinition d) {
+        if (d.getMaxParallelWorkers() > 1 && d.getRecoveryMode() == WorkflowRecoveryMode.MANUAL) {
+            throw new BadRequestException("Manual recovery is not available with parallel workers.");
+        }
         if (d.getFailurePolicy() == WorkflowFailurePolicy.RETRY && d.getMaxRetriesPerStep() < 1) {
             throw new BadRequestException("The RETRY policy needs maxRetriesPerStep of at least 1.");
         }
