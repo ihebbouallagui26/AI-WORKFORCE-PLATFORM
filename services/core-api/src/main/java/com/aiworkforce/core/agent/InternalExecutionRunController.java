@@ -37,11 +37,12 @@ public class InternalExecutionRunController {
     @Schema(name = "ExecutionStarted")
     public record Started(UUID executionId, UUID agentId, String task,
             @Schema(description = "COORDINATOR when this execution is a workflow coordinator turn, otherwise null") String workflowRole,
-            @Schema(description = "Platform-native actions offered ONLY to a coordinator turn (never MCP tools)") List<PlatformAction> platformActions) {
+            @Schema(description = "Platform-native actions offered ONLY to a coordinator turn (never MCP tools)") List<PlatformAction> platformActions,
+            @Schema(description = "Seconds left (step or workflow deadline) when the execution belongs to a workflow; the orchestrator must not run past it") Long deadlineSeconds) {
 
-        static Started of(StartedExecution started, boolean coordinatorTurn) {
+        static Started of(StartedExecution started, boolean coordinatorTurn, Long deadlineSeconds) {
             return new Started(started.executionId(), started.agentId(), started.task(), coordinatorTurn ? "COORDINATOR" : null,
-                    coordinatorTurn ? WorkflowActionCatalog.actions() : List.of());
+                    coordinatorTurn ? WorkflowActionCatalog.actions() : List.of(), deadlineSeconds);
         }
     }
 
@@ -85,7 +86,8 @@ public class InternalExecutionRunController {
     @Operation(operationId = "startExecutionRun", summary = "PENDING to RUNNING; returns the instruction and agent")
     public Started start(@PathVariable UUID organizationId, @PathVariable UUID executionId) {
         StartedExecution started = coordinator.start(organizationId, executionId);
-        return Started.of(started, workflowActions.isCoordinatorTurn(organizationId, executionId));
+        return Started.of(started, workflowActions.isCoordinatorTurn(organizationId, executionId),
+                workflowActions.remainingSeconds(organizationId, executionId));
     }
 
     @PostMapping("/credential")

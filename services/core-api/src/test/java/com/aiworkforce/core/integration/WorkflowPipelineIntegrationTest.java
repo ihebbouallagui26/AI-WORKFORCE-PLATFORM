@@ -32,7 +32,7 @@ import tools.jackson.databind.JsonNode;
  * state machine, not any model behaviour. The background maintenance is turned off so each pass is explicit.
  */
 @Import({WorkflowProbe.class, MaintenanceProbe.class})
-@TestPropertySource(properties = {"app.workflows.maintenance-ms=3600000", "app.executions.approval-maintenance-ms=3600000"})
+@TestPropertySource(properties = {"app.workflows.maintenance-ms=3600000", "app.executions.approval-maintenance-ms=3600000", "app.workflows.retry-base-delay=PT0S"})
 class WorkflowPipelineIntegrationTest extends ToolFlows {
 
     private static final Object[] NOTE = {"diagnostic.record_note", "WRITE", false};

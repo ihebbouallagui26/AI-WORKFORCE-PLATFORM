@@ -41,13 +41,18 @@ public class WorkflowController {
     public record CreateRequest(@NotBlank @Size(max = 120) String name, @Size(max = 2000) String description,
             @Schema(description = "PIPELINE (default, static ordered steps) or COORDINATED (a chosen coordinator agent delegates)") WorkflowMode mode,
             @Min(1) @Max(8) Integer maxSteps, @Min(0) @Max(2) Integer maxRetriesPerStep,
-            @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds) {
+            @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds,
+            @Schema(description = "FAIL_FAST (default), CONTINUE or RETRY (needs maxRetriesPerStep of at least 1)") WorkflowFailurePolicy failurePolicy,
+            @Schema(description = "NONE (default) or MANUAL: a safe failure waits for a person to retry the step") WorkflowRecoveryMode recoveryMode,
+            @Min(0) @Max(86_400) @Schema(description = "Per-step timeout in seconds (10 or more); 0 removes it") Integer stepTimeoutSeconds) {
     }
 
     @Schema(name = "UpdateWorkflowRequest")
     public record UpdateRequest(@Size(min = 1, max = 120) String name, @Size(max = 2000) String description,
             @Min(1) @Max(8) Integer maxSteps, @Min(0) @Max(2) Integer maxRetriesPerStep,
-            @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds) {
+            @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds,
+            WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode,
+            @Min(0) @Max(86_400) Integer stepTimeoutSeconds) {
     }
 
     @Schema(name = "SetWorkflowParticipantsRequest")
@@ -75,7 +80,8 @@ public class WorkflowController {
     @Operation(operationId = "createWorkflow", summary = "Create a workflow definition (no participants or steps yet)")
     public DefinitionView create(@PathVariable UUID organizationId, AuthenticatedUser user, @Valid @RequestBody CreateRequest request) {
         return workflows.create(organizationId, user, request.name(), request.description(), request.maxSteps(),
-                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.mode());
+                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.mode(), request.failurePolicy(),
+                request.recoveryMode(), request.stepTimeoutSeconds());
     }
 
     @GetMapping
@@ -98,7 +104,8 @@ public class WorkflowController {
     public DefinitionView update(@PathVariable UUID organizationId, @PathVariable UUID workflowId, AuthenticatedUser user,
             @Valid @RequestBody UpdateRequest request) {
         return workflows.update(organizationId, workflowId, user, request.name(), request.description(), request.maxSteps(),
-                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds());
+                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.failurePolicy(),
+                request.recoveryMode(), request.stepTimeoutSeconds());
     }
 
     @PutMapping(path = "/{workflowId}/participants", consumes = MediaType.APPLICATION_JSON_VALUE)

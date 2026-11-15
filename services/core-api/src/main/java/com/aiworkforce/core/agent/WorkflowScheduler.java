@@ -45,13 +45,15 @@ class WorkflowScheduler {
     static final String COORDINATOR_TURN_LIMIT = "COORDINATOR_TURN_LIMIT";
     static final String COORDINATOR_NO_ACTION = "COORDINATOR_NO_ACTION";
     static final String STEP_LIMIT = "STEP_LIMIT";
+    static final String STEP_TIMEOUT = "STEP_TIMEOUT";
+    static final String PARTIAL_FAILURE = "PARTIAL_FAILURE";
     static final String CANCELLED_CODE = "WORKFLOW_CANCELLED";
     static final String TIMEOUT_CODE = "WORKFLOW_TIMEOUT";
     static final String COORDINATOR = "COORDINATOR";
+    /** Manual retries per run (the database enforces the same bound). */
+    static final int MAX_MANUAL_RETRIES = 3;
     /** A coordinated run always keeps this many tokens in reserve for a decision: below it no new turn or worker starts. */
     static final int MIN_TOKEN_RESERVE = 500;
-    /** Provider failures that may be retried automatically, and only when no tool effect has started. */
-    private static final Set<String> TRANSIENT = Set.of("PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "PROVIDER_RATE_LIMIT");
 
     private final WorkflowRunRepository runs;
     private final WorkflowStepRepository steps;
@@ -120,6 +122,11 @@ class WorkflowScheduler {
             if (run.getStatus() == WorkflowRunStatus.CANCEL_REQUESTED && execution != null && !execution.getStatus().isTerminal()) {
                 requestStop(run, execution, now);
             }
+            if (current.getDeadlineAt() != null && !now.isBefore(current.getDeadlineAt()) && execution != null
+                    && !execution.getStatus().isTerminal()) {
+                // The step exceeded ITS time limit: the child is ended (a tool call in flight becomes OUTCOME_UNKNOWN, never "cancelled").
+                stopChild(execution, STEP_TIMEOUT, "The step exceeded its time limit.");
+            }
             if (execution == null || execution.getStatus().isTerminal()) {
                 settle(run, current, execution, now);
             } else {
@@ -133,6 +140,9 @@ class WorkflowScheduler {
             append(run, null, WorkflowMessageKind.STATUS, "The workflow was cancelled. Started steps are not undone.", now);
             audit(run, "workflow.run.cancelled");
             return;
+        }
+        if (run.getStatus() == WorkflowRunStatus.WAITING_RECOVERY) {
+            return; // a failed step waits for a person: nothing starts until a retry is requested (or the deadline / a cancel comes)
         }
         if (snapshot.coordinated()) {
             decideCoordinated(run, snapshot, latest(run), now);
@@ -151,23 +161,12 @@ class WorkflowScheduler {
         switch (last.getStatus()) {
             case SUCCEEDED -> {
                 if (last.getStepRank() >= run.getTotalSteps()) {
-                    String finalResult = executions.findByOrganizationIdAndId(run.getOrganizationId(), last.getExecutionId())
-                            .map(AgentExecution::getResult).orElse(last.getResultSummary());
-                    run.succeed(WorkflowText.bounded(finalResult, properties.maxResultChars()), now);
-                    append(run, null, WorkflowMessageKind.STATUS, "The workflow succeeded.", now);
-                    audit(run, "workflow.run.succeeded");
+                    finishPipeline(run, last, now);
                 } else {
                     schedule(run, snapshot, last.getStepRank() + 1, 1, now);
                 }
             }
-            case FAILED -> {
-                if (canRetry(run, snapshot, last)) {
-                    announceRetry(run, last, now);
-                    schedule(run, snapshot, last.getStepRank(), last.getAttempt() + 1, now);
-                } else {
-                    failStep(run, last, now);
-                }
-            }
+            case FAILED -> afterFailure(run, snapshot, last, now);
             case CANCELLED -> {
                 run.fail(STEP_FAILED, "Step " + last.getStepRank() + " was cancelled.", now);
                 audit(run, "workflow.run.failed");
@@ -178,14 +177,97 @@ class WorkflowScheduler {
         }
     }
 
-    private boolean canRetry(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep last) {
-        return last.getAttempt() <= snapshot.maxRetriesPerStep() && last.getErrorCode() != null && TRANSIENT.contains(last.getErrorCode())
-                && !invocations.existsStartedByOrganizationAndExecution(run.getOrganizationId(), last.getExecutionId());
+    // ------------------------------------------------------------------ failure handling (C3.3)
+
+    /**
+     * What happens after a step ended FAILED. The Core API decides, from the classification recorded at settle time:
+     * a durable scheduled retry (backoff) comes first; then the workflow policy (CONTINUE), then manual recovery, else FAIL_FAST.
+     */
+    private void afterFailure(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep last, Instant now) {
+        boolean coordinatorStep = COORDINATOR.equals(last.getRole());
+        if (last.getNextAttemptAt() != null) {
+            if (now.isBefore(last.getNextAttemptAt())) {
+                return; // backoff not over: the due time is in PostgreSQL, a restart does not lose it
+            }
+            relaunch(run, snapshot, last, coordinatorStep, now);
+            return;
+        }
+        WorkflowFailureClassifier.Failure failure = new WorkflowFailureClassifier.Failure(
+                last.getFailureCategory() == null ? FailureCategory.UNCLASSIFIED : last.getFailureCategory(), Boolean.TRUE.equals(last.getRetrySafe()));
+        if (snapshot.policy() == WorkflowFailurePolicy.CONTINUE && !coordinatorStep && failure.continuable()) {
+            continueAfter(run, snapshot, last, now);
+            return;
+        }
+        if (snapshot.manualRecovery() && failure.manuallyRecoverable() && run.getManualRetries() < MAX_MANUAL_RETRIES) {
+            run.waitRecovery(now);
+            append(run, last.getStepRank(), WorkflowMessageKind.STATUS, "Step " + last.getStepRank() + " failed (" + failure.category()
+                    + "): the workflow waits for a person to retry the step or cancel the run.", now);
+            audit(run, "workflow.run.waiting-recovery");
+            return;
+        }
+        failStep(run, last, now);
     }
 
-    private void announceRetry(WorkflowRun run, WorkflowStep last, Instant now) {
-        append(run, last.getStepRank(), WorkflowMessageKind.STATUS,
-                "Step " + last.getStepRank() + " failed with a transient provider error: retrying (a new execution).", now);
+    /** Launches the next attempt of the same rank (a NEW child execution; the failed one is kept). */
+    private void relaunch(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep last, boolean coordinatorStep, Instant now) {
+        int rank = last.getStepRank();
+        int attempt = last.getAttempt() + 1;
+        if (coordinatorStep) {
+            scheduleCoordinatorTurn(run, snapshot, false, rank, attempt, now);
+        } else if (snapshot.coordinated()) {
+            WorkflowAction delegation = delegationOf(run, rank);
+            if (delegation == null) {
+                failStep(run, last, now);
+            } else {
+                scheduleWorker(run, snapshot, delegation, rank, attempt, now);
+            }
+        } else {
+            schedule(run, snapshot, rank, attempt, now);
+        }
+    }
+
+    /** CONTINUE: the failure stays recorded and is reported to whoever decides next; it is never presented as a success. */
+    private void continueAfter(WorkflowRun run, WorkflowSpec.Snapshot snapshot, WorkflowStep last, Instant now) {
+        append(run, last.getStepRank(), WorkflowMessageKind.STATUS, "Step " + last.getStepRank() + " failed (" + last.getFailureCategory()
+                + "): the CONTINUE policy keeps the failure and goes on.", now);
+        audit.record(run.getOrganizationId(), null, "workflow.step.continued", "workflow", run.getId(), AgentSupport.details(
+                "workflowRunId", run.getId(), "step", last.getStepRank(), "category", String.valueOf(last.getFailureCategory())));
+        if (snapshot.coordinated()) {
+            scheduleCoordinatorTurn(run, snapshot, false, run.getNextRank(), 1, now);
+        } else if (last.getStepRank() >= run.getTotalSteps()) {
+            finishPipeline(run, last, now);
+        } else {
+            schedule(run, snapshot, last.getStepRank() + 1, 1, now);
+        }
+    }
+
+    /** End of a pipeline: a SUCCEEDED run only when every rank has a successful attempt; otherwise truthfully FAILED (partial). */
+    private void finishPipeline(WorkflowRun run, WorkflowStep last, Instant now) {
+        Set<Integer> done = new java.util.HashSet<>();
+        for (WorkflowStep s : steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(run.getOrganizationId(), run.getId())) {
+            if (s.getStatus() == WorkflowStepStatus.SUCCEEDED) {
+                done.add(s.getStepRank());
+            }
+        }
+        int failed = run.getTotalSteps() - done.size();
+        if (failed > 0) {
+            failRun(run, PARTIAL_FAILURE, failed + " of " + run.getTotalSteps() + " steps failed: the results of the others are kept.", now);
+            return;
+        }
+        String finalResult = executions.findByOrganizationIdAndId(run.getOrganizationId(), last.getExecutionId())
+                .map(AgentExecution::getResult).orElse(last.getResultSummary());
+        run.succeed(WorkflowText.bounded(finalResult, properties.maxResultChars()), now);
+        append(run, null, WorkflowMessageKind.STATUS, "The workflow succeeded.", now);
+        audit(run, "workflow.run.succeeded");
+    }
+
+    /** Backoff before attempt N+1: base * 2^(N-1), capped, with +/-20% jitter, decided once and stored. */
+    private Instant retryDue(int failedAttempt, Instant now) {
+        long base = properties.retryBaseDelay().toMillis();
+        long max = properties.retryMaxDelay().toMillis();
+        long delay = Math.min(max, base * (1L << Math.min(10, failedAttempt - 1)));
+        double jitter = 0.8 + java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 0.4;
+        return now.plusMillis(Math.min(max, (long) (delay * jitter)));
     }
 
     /** FAIL_FAST: nothing after a failed step ever starts. OUTCOME_UNKNOWN is never retried. */
@@ -215,6 +297,10 @@ class WorkflowScheduler {
         for (WorkflowStep done : steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(org, run.getId())) {
             if (done.getStatus() == WorkflowStepStatus.SUCCEEDED) {
                 summaries.put(done.getStepRank(), done.getResultSummary());
+                names.put(done.getStepRank(), done.getName());
+            } else if (done.getStatus() == WorkflowStepStatus.FAILED && !summaries.containsKey(done.getStepRank())) {
+                // CONTINUE: a failed predecessor is reported AS a failure, never as a result.
+                summaries.put(done.getStepRank(), "[This step FAILED (" + done.getFailureCategory() + "). No result is available.]");
                 names.put(done.getStepRank(), done.getName());
             }
         }
@@ -246,23 +332,7 @@ class WorkflowScheduler {
                     scheduleCoordinatorTurn(run, snapshot, false, run.getNextRank(), 1, now); // a worker result: decide again
                 }
             }
-            case FAILED -> {
-                if (canRetry(run, snapshot, last)) {
-                    announceRetry(run, last, now);
-                    if (coordinatorStep) {
-                        scheduleCoordinatorTurn(run, snapshot, false, last.getStepRank(), last.getAttempt() + 1, now);
-                    } else {
-                        WorkflowAction delegation = delegationOf(run, last.getStepRank());
-                        if (delegation == null) {
-                            failStep(run, last, now);
-                        } else {
-                            scheduleWorker(run, snapshot, delegation, last.getStepRank(), last.getAttempt() + 1, now);
-                        }
-                    }
-                } else {
-                    failStep(run, last, now); // FAIL_FAST: a failed coordinator turn creates no worker; a failed worker ends the run
-                }
-            }
+            case FAILED -> afterFailure(run, snapshot, last, now); // FAIL_FAST: a failed coordinator turn creates no worker
             case CANCELLED -> {
                 run.fail(STEP_FAILED, "Step " + last.getStepRank() + " was cancelled.", now);
                 audit(run, "workflow.run.failed");
@@ -324,14 +394,24 @@ class WorkflowScheduler {
         }
         List<String> results = new ArrayList<>();
         int workerSteps = 0;
+        Map<Integer, WorkflowStep> latestByRank = new java.util.TreeMap<>();
         for (WorkflowStep s : all) {
-            if (!COORDINATOR.equals(s.getRole()) && s.getStatus() != WorkflowStepStatus.FAILED && s.getStatus() != WorkflowStepStatus.CANCELLED) {
-                workerSteps++;
+            if (!COORDINATOR.equals(s.getRole())) {
+                latestByRank.put(s.getStepRank(), s); // attempts are ordered: the last one of a rank is the one that counts
+                if (s.getAttempt() == 1) {
+                    workerSteps++;
+                }
             }
-            if (!COORDINATOR.equals(s.getRole()) && s.getStatus() == WorkflowStepStatus.SUCCEEDED) {
-                WorkflowSpec.Member member = snapshot.memberOf(s.getAgentId());
-                results.add("--- Step " + s.getStepRank() + " by " + (member == null ? "a worker" : member.ref() + " (" + member.name() + ")")
-                        + " ---\n" + WorkflowText.bounded(s.getResultSummary(), 1500));
+        }
+        for (WorkflowStep s : latestByRank.values()) {
+            WorkflowSpec.Member member = snapshot.memberOf(s.getAgentId());
+            String who = member == null ? "a worker" : member.ref() + " (" + member.name() + ")";
+            if (s.getStatus() == WorkflowStepStatus.SUCCEEDED) {
+                results.add("--- Step " + s.getStepRank() + " by " + who + " ---\n" + WorkflowText.bounded(s.getResultSummary(), 1500));
+            } else if (s.getStatus() == WorkflowStepStatus.FAILED) {
+                results.add("--- Step " + s.getStepRank() + " by " + who + " FAILED (" + s.getFailureCategory()
+                        + (Boolean.TRUE.equals(s.getRetrySafe()) ? ", nothing external happened" : ", an external effect may have happened")
+                        + ") ---\n" + WorkflowText.bounded(s.getErrorMessage(), 280));
             }
         }
         String task = WorkflowText.composeCoordinatorTask(run.getObjective(), snapshot.members(), results, turns + (attempt == 1 ? 1 : 0),
@@ -438,13 +518,23 @@ class WorkflowScheduler {
             failRun(run, STEP_NOT_RUNNABLE, WorkflowText.bounded("Step " + rank + " cannot run: " + e.getMessage(), 280), now);
             return null;
         }
-        WorkflowStep step = steps.save(new WorkflowStep(UUID.randomUUID(), org, run.getId(), rank, attempt, name, agentId,
-                execution.getId(), inputRanks, role, now));
+        String reason = "INITIAL";
+        if (attempt > 1) {
+            WorkflowStep before = steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(org, run.getId()).stream()
+                    .filter(s -> s.getStepRank() == rank && s.getAttempt() == attempt - 1).findFirst().orElse(null);
+            reason = before != null && before.getRetryRequestedBy() != null ? "MANUAL_RETRY" : "AUTO_RETRY";
+        }
+        Integer stepTimeout = WorkflowSpec.parseSnapshot(run.getSnapshot()).stepTimeoutSeconds();
+        Instant stepDeadline = stepTimeout == null ? null : java.util.Collections.min(List.of(now.plusSeconds(stepTimeout), run.getDeadlineAt()));
+        WorkflowStep fresh = new WorkflowStep(UUID.randomUUID(), org, run.getId(), rank, attempt, name, agentId,
+                execution.getId(), inputRanks, role, now);
+        fresh.launchedAs(reason, stepDeadline);
+        WorkflowStep step = steps.save(fresh);
         run.scheduled(rank);
         run.markRunning(now);
         audit.record(org, run.getRequestedBy(), "workflow.step.started", "workflow", run.getId(), AgentSupport.details(
                 "workflowRunId", run.getId(), "step", rank, "attempt", attempt, "role", role, "agentId", agentId,
-                "executionId", execution.getId()));
+                "executionId", execution.getId(), "reason", reason));
         return step;
     }
 
@@ -481,12 +571,43 @@ class WorkflowScheduler {
             } else {
                 step.fail(code, message, now);
             }
+            WorkflowFailureClassifier.Failure failure = WorkflowFailureClassifier.classify(code,
+                    invocations.existsStartedByOrganizationAndExecution(run.getOrganizationId(), execution.getId()),
+                    // A call still RUNNING when its execution is over, or already closed as such, has an UNKNOWN outcome.
+                    invocations.existsOutcomeUnknownByOrganizationAndExecution(run.getOrganizationId(), execution.getId())
+                            || invocations.existsRunningByOrganizationAndExecution(run.getOrganizationId(), execution.getId()));
+            step.classified(failure);
+            scheduleAutomaticRetry(run, step, failure, now);
             append(run, step.getStepRank(), WorkflowMessageKind.STATUS,
                     "Step " + step.getStepRank() + " ended: " + code + ".", now);
             audit.record(run.getOrganizationId(), null, "workflow.step.failed", "workflow", run.getId(), AgentSupport.details(
                     "workflowRunId", run.getId(), "step", step.getStepRank(), "role", step.getRole(), "executionId", execution.getId(),
                     "errorCode", code));
         }
+    }
+
+    /**
+     * Decides, at the moment a step fails, whether a bounded AUTOMATIC retry is due. Only a classified transient provider failure
+     * before any external action started qualifies; never an unknown outcome, never an authorization failure, never after a
+     * manual retry, never past the workflow deadline. The due time is stored on the failed step (durable).
+     */
+    private void scheduleAutomaticRetry(WorkflowRun run, WorkflowStep step, WorkflowFailureClassifier.Failure failure, Instant now) {
+        WorkflowSpec.Snapshot snapshot = WorkflowSpec.parseSnapshot(run.getSnapshot());
+        if (!failure.autoRetryable() || "MANUAL_RETRY".equals(step.getLaunchReason()) || step.getAttempt() > snapshot.maxRetriesPerStep()
+                || run.getStatus() == WorkflowRunStatus.CANCEL_REQUESTED) {
+            return;
+        }
+        Instant due = retryDue(step.getAttempt(), now);
+        if (!due.isBefore(run.getDeadlineAt())) {
+            append(run, step.getStepRank(), WorkflowMessageKind.STATUS, "Step " + step.getStepRank()
+                    + " failed: no automatic retry, the retry delay would pass the workflow deadline.", now);
+            return;
+        }
+        step.retryDueAt(due, null, now);
+        append(run, step.getStepRank(), WorkflowMessageKind.STATUS, "Step " + step.getStepRank() + " failed with a transient provider error: "
+                + "automatic retry " + step.getAttempt() + " of " + snapshot.maxRetriesPerStep() + " scheduled (a new execution).", now);
+        audit.record(run.getOrganizationId(), null, "workflow.step.retry-scheduled", "workflow", run.getId(), AgentSupport.details(
+                "workflowRunId", run.getId(), "step", step.getStepRank(), "attempt", step.getAttempt(), "dueAt", due.toString()));
     }
 
     private void mirror(WorkflowRun run, WorkflowStep step, AgentExecution execution, Instant now) {

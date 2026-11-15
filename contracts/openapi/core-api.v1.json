@@ -1300,6 +1300,59 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/steps/{rank}/retry" : {
+      "post" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Retry the failed step that holds a run in WAITING_RECOVERY (a new attempt; never an unknown outcome)",
+        "operationId" : "retryWorkflowStep",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "rank",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 40,
+            "minimum" : 1
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/cancel" : {
       "post" : {
         "tags" : [ "Workflow runs" ],
@@ -4745,7 +4798,7 @@
           "required" : false,
           "schema" : {
             "type" : "string",
-            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "WAITING_RECOVERY", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
           }
         }, {
           "name" : "workflowId",
@@ -4827,6 +4880,49 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/WorkflowRun"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/summary" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "Durations, attempts, failures by category, tokens and recovery state of a run",
+        "operationId" : "getWorkflowRunSummary",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowRunSummary"
                 }
               }
             }
@@ -6106,6 +6202,18 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "failurePolicy" : {
+            "type" : "string",
+            "enum" : [ "FAIL_FAST", "CONTINUE", "RETRY" ]
+          },
+          "recoveryMode" : {
+            "type" : "string",
+            "enum" : [ "NONE", "MANUAL" ]
+          },
+          "stepTimeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "createdBy" : {
             "type" : "string",
             "format" : "uuid"
@@ -7122,6 +7230,23 @@
             "format" : "int32",
             "maximum" : 86400,
             "minimum" : 30
+          },
+          "failurePolicy" : {
+            "type" : "string",
+            "description" : "FAIL_FAST (default), CONTINUE or RETRY (needs maxRetriesPerStep of at least 1)",
+            "enum" : [ "FAIL_FAST", "CONTINUE", "RETRY" ]
+          },
+          "recoveryMode" : {
+            "type" : "string",
+            "description" : "NONE (default) or MANUAL: a safe failure waits for a person to retry the step",
+            "enum" : [ "NONE", "MANUAL" ]
+          },
+          "stepTimeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32",
+            "description" : "Per-step timeout in seconds (10 or more); 0 removes it",
+            "maximum" : 86400,
+            "minimum" : 0
           }
         },
         "required" : [ "name" ]
@@ -7168,7 +7293,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "WAITING_RECOVERY", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
           },
           "requestedBy" : {
             "type" : "string",
@@ -8107,6 +8232,11 @@
             "items" : {
               "$ref" : "#/components/schemas/PlatformAction"
             }
+          },
+          "deadlineSeconds" : {
+            "type" : "integer",
+            "format" : "int64",
+            "description" : "Seconds left (step or workflow deadline) when the execution belongs to a workflow; the orchestrator must not run past it"
           }
         }
       },
@@ -8265,6 +8395,20 @@
             "format" : "int32",
             "maximum" : 86400,
             "minimum" : 30
+          },
+          "failurePolicy" : {
+            "type" : "string",
+            "enum" : [ "FAIL_FAST", "CONTINUE", "RETRY" ]
+          },
+          "recoveryMode" : {
+            "type" : "string",
+            "enum" : [ "NONE", "MANUAL" ]
+          },
+          "stepTimeoutSeconds" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 86400,
+            "minimum" : 0
           }
         }
       },
@@ -8683,6 +8827,159 @@
           }
         }
       },
+      "WorkflowAttemptUsage" : {
+        "type" : "object",
+        "properties" : {
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "attempt" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "role" : {
+            "type" : "string"
+          },
+          "launchReason" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
+          },
+          "errorCode" : {
+            "type" : "string"
+          },
+          "failureCategory" : {
+            "type" : "string",
+            "enum" : [ "TRANSIENT_PROVIDER_FAILURE", "PERMANENT_PROVIDER_FAILURE", "TOOL_FAILURE", "OUTCOME_UNKNOWN", "AUTHORIZATION_FAILURE", "WORKFLOW_LIMIT_EXCEEDED", "UNCLASSIFIED" ]
+          },
+          "retrySafe" : {
+            "type" : "boolean"
+          },
+          "executionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "inputTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "outputTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "WorkflowRunSummary" : {
+        "type" : "object",
+        "properties" : {
+          "runId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "mode" : {
+            "type" : "string",
+            "enum" : [ "PIPELINE", "COORDINATED" ]
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING", "RUNNING", "WAITING_APPROVAL", "WAITING_RECOVERY", "CANCEL_REQUESTED", "SUCCEEDED", "FAILED", "CANCELLED", "TIMEOUT" ]
+          },
+          "failurePolicy" : {
+            "type" : "string",
+            "enum" : [ "FAIL_FAST", "CONTINUE", "RETRY" ]
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "startedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deadlineAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "durationMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "attempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "automaticRetries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "manualRetries" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "failedAttempts" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "failuresByCategory" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "inputTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "outputTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "coordinatorTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "workerTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "tokenBudget" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "tokensRemaining" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "nextRetryAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "waitingRecovery" : {
+            "type" : "boolean"
+          },
+          "errorCode" : {
+            "type" : "string"
+          },
+          "attemptList" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowAttemptUsage"
+            }
+          }
+        }
+      },
       "PageResponseWorkflowStep" : {
         "type" : "object",
         "properties" : {
@@ -8771,6 +9068,24 @@
             "format" : "date-time"
           },
           "completedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "launchReason" : {
+            "type" : "string"
+          },
+          "failureCategory" : {
+            "type" : "string",
+            "enum" : [ "TRANSIENT_PROVIDER_FAILURE", "PERMANENT_PROVIDER_FAILURE", "TOOL_FAILURE", "OUTCOME_UNKNOWN", "AUTHORIZATION_FAILURE", "WORKFLOW_LIMIT_EXCEEDED", "UNCLASSIFIED" ]
+          },
+          "retrySafe" : {
+            "type" : "boolean"
+          },
+          "nextAttemptAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deadlineAt" : {
             "type" : "string",
             "format" : "date-time"
           }

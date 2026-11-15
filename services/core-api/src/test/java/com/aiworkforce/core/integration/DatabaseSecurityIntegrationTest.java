@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("8");
+            assertThat(result.targetSchemaVersion).isEqualTo("9");
         }
     }
 
@@ -569,7 +569,7 @@ class DatabaseSecurityIntegrationTest {
                         + UUID.randomUUID() + "', '" + organization + "', '" + definition + "', 1, '{}', '" + user
                         + "', 'o', 'PENDING', 1, 1000, now(), now(), now())");
             }
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("8").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("8");
@@ -598,12 +598,89 @@ class DatabaseSecurityIntegrationTest {
                     assertThat(rows.getInt(1)).isEqualTo(2);
                 }
             }
-            flyway.apply("latest").validate();
+            flyway.apply("8").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
                 statement.execute("SELECT count(*) FROM workflow_actions");
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_actions ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A C3.2 database (V1..V8 with a pipeline definition and a run) upgrades to V9: existing rows keep FAIL_FAST and no manual
+     * recovery, the new run status and step columns exist with their database-level bounds, and the runtime role keeps DML
+     * without DDL.
+     */
+    @Test
+    void upgradesAnExistingC32DatabaseAndAddsWorkflowReliability() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("8").migrate();
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID definition = UUID.randomUUID();
+            UUID run = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'c32@example.test', true, 'C32', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing C32 organization', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, created_by, created_at, updated_at) VALUES ('"
+                        + definition + "', '" + organization + "', 'pipeline', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_runs (id, organization_id, definition_id, definition_version, snapshot, requested_by, "
+                        + "objective, status, total_steps, token_budget, deadline_at, created_at, updated_at) VALUES ('"
+                        + run + "', '" + organization + "', '" + definition + "', 1, '{}', '" + user
+                        + "', 'o', 'RUNNING', 1, 1000, now(), now(), now())");
+            }
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("9");
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT (SELECT count(*) FROM workflow_definitions WHERE failure_policy = "
+                        + "'FAIL_FAST' AND recovery_mode = 'NONE' AND step_timeout_seconds IS NULL), (SELECT count(*) FROM workflow_runs WHERE "
+                        + "failure_policy = 'FAIL_FAST' AND manual_retries = 0)")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(1);
+                    assertThat(rows.getInt(2)).isEqualTo(1);
+                }
+                statement.execute("UPDATE workflow_runs SET status = 'WAITING_RECOVERY' WHERE id = '" + run + "'");
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_runs SET status = 'PAUSED' WHERE id = '" + run + "'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_runs SET manual_retries = 4 WHERE id = '" + run + "'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_definitions SET failure_policy = 'EVERYTHING'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_definitions SET failure_policy = 'CONTINUE', recovery_mode = 'MANUAL'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_definitions SET step_timeout_seconds = 5"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT count(*) FROM information_schema.columns WHERE table_name = "
+                        + "'workflow_steps' AND column_name IN ('launch_reason', 'failure_category', 'retry_safe', 'next_attempt_at', "
+                        + "'deadline_at', 'retry_requested_by')")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(6);
+                }
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM workflow_steps WHERE next_attempt_at IS NOT NULL");
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_steps ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
             }
         }
     }

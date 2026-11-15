@@ -112,6 +112,8 @@ class ExecutionStarted(WireModel):
     task: str
     workflow_role: str | None = None
     platform_actions: list[PlatformAction] = Field(default_factory=list)
+    # C3.3: seconds left (step or workflow deadline) when the execution belongs to a workflow; None otherwise.
+    deadline_seconds: int | None = Field(default=None, ge=1)
 
 
 class ExecutionCredential(WireModel):

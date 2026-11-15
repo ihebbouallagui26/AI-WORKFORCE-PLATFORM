@@ -31,7 +31,7 @@ import tools.jackson.databind.JsonNode;
  * started next), not any model behaviour. Background maintenance is off so every scheduler pass is explicit.
  */
 @Import({WorkflowProbe.class, MaintenanceProbe.class})
-@TestPropertySource(properties = {"app.workflows.maintenance-ms=3600000", "app.executions.approval-maintenance-ms=3600000"})
+@TestPropertySource(properties = {"app.workflows.maintenance-ms=3600000", "app.executions.approval-maintenance-ms=3600000", "app.workflows.retry-base-delay=PT0S"})
 class WorkflowCoordinatorIntegrationTest extends ToolFlows {
 
     @Autowired

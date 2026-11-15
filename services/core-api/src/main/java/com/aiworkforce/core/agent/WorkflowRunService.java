@@ -45,6 +45,7 @@ public class WorkflowRunService {
     private final WorkflowStepRepository steps;
     private final WorkflowMessageRepository messages;
     private final WorkflowActionRepository actionRepository;
+    private final ExecutionRepository executionRepository;
     private final AgentRepository agents;
     private final ExecutionService executionService;
     private final WorkflowScheduler scheduler;
@@ -55,7 +56,7 @@ public class WorkflowRunService {
     private final Clock clock;
 
     public WorkflowRunService(WorkflowDefinitionRepository definitions, WorkflowParticipantRepository participants,
-            WorkflowRunRepository runs, WorkflowStepRepository steps, WorkflowMessageRepository messages, WorkflowActionRepository actionRepository, AgentRepository agents,
+            WorkflowRunRepository runs, WorkflowStepRepository steps, WorkflowMessageRepository messages, WorkflowActionRepository actionRepository, ExecutionRepository executionRepository, AgentRepository agents,
             ExecutionService executionService, WorkflowScheduler scheduler, TenantAccessService access,
             OrganizationLock organizationLock, AuditLog audit, WorkflowProperties properties, Clock clock) {
         this.definitions = definitions;
@@ -64,6 +65,7 @@ public class WorkflowRunService {
         this.steps = steps;
         this.messages = messages;
         this.actionRepository = actionRepository;
+        this.executionRepository = executionRepository;
         this.agents = agents;
         this.executionService = executionService;
         this.scheduler = scheduler;
@@ -126,7 +128,8 @@ public class WorkflowRunService {
         WorkflowSpec.Snapshot snapshot = new WorkflowSpec.Snapshot(definition.getId(), definition.getVersion(), definition.getName(),
                 stepList, participantAgents.stream().sorted().toList(), definition.getMaxSteps(), definition.getMaxRetriesPerStep(),
                 definition.getTokenBudget(), definition.getDeadlineSeconds(), definition.getMode().name(),
-                coordinated ? definition.getCoordinatorAgentId() : null, members);
+                coordinated ? definition.getCoordinatorAgentId() : null, members, definition.getFailurePolicy().name(),
+                definition.getRecoveryMode().name(), definition.getStepTimeoutSeconds());
         // save() merges an entity with an assigned id and returns the MANAGED copy: only that one may be modified afterwards.
         WorkflowRun run = runs.save(new WorkflowRun(UUID.randomUUID(), definition, WorkflowSpec.toJson(snapshot), user.userId(),
                 requestId, WorkflowText.mask(cleaned), coordinated ? definition.getMaxSteps() : stepList.size(), MDC.get(RequestIdFilter.MDC_KEY), now));
@@ -240,6 +243,103 @@ public class WorkflowRunService {
         }
         scheduler.advance(run);
         return RunView.of(run);
+    }
+
+    /**
+     * Manual recovery: retries the failed step that holds a run in WAITING_RECOVERY. It is a NEW attempt (a new child execution; the
+     * failed one stays). Only a failure whose outcome is known and that started no external action qualifies; an OUTCOME_UNKNOWN
+     * step is never replayed. Everything is revalidated now: permissions, requester, participant, agent, provider, budget, deadline.
+     * A repeated request finds the run already running and gets a 409: it never creates a second attempt.
+     */
+    @Transactional
+    public RunView retryStep(UUID organizationId, UUID runId, int rank, AuthenticatedUser user) {
+        OrganizationAccess granted = access.require(organizationId, user, Permission.WORKFLOW_EXECUTE);
+        granted.require(Permission.AGENT_EXECUTE);
+        WorkflowRun run = runs.lockByOrganizationAndId(organizationId, runId).orElseThrow(() -> new ResourceNotFoundException("workflow run"));
+        if (run.getStatus() != WorkflowRunStatus.WAITING_RECOVERY) {
+            throw new ConflictException("Only a run waiting for recovery can retry a step (this one is " + run.getStatus() + ").");
+        }
+        Instant now = Instant.now(clock);
+        if (!now.isBefore(run.getDeadlineAt())) {
+            throw new ConflictException("The workflow time limit is reached: nothing can be retried.");
+        }
+        List<WorkflowStep> latest = steps.findLatestByOrganizationAndRun(organizationId, runId, org.springframework.data.domain.PageRequest.of(0, 1));
+        WorkflowStep last = latest.isEmpty() ? null : latest.getFirst();
+        if (last == null || last.getStepRank() != rank || last.getStatus() != WorkflowStepStatus.FAILED) {
+            throw new ConflictException("Only the failed step that stopped the run can be retried.");
+        }
+        if (last.getFailureCategory() == FailureCategory.OUTCOME_UNKNOWN) {
+            throw new ConflictException("The outcome of an external action of this step is unknown: it is never replayed automatically or manually.");
+        }
+        if (!WorkflowFailureClassifier.recoverable(last.getFailureCategory(), last.getRetrySafe())) {
+            throw new ConflictException("This failure (" + last.getFailureCategory() + ") cannot be retried safely.");
+        }
+        if (run.getManualRetries() >= WorkflowScheduler.MAX_MANUAL_RETRIES) {
+            throw new ConflictException("The manual retry budget of this run is used up.");
+        }
+        if (run.getTokensUsed() >= run.getTokenBudget()) {
+            throw new ConflictException("The token budget of the workflow is used up.");
+        }
+        WorkflowSpec.Snapshot snapshot = WorkflowSpec.parseSnapshot(run.getSnapshot());
+        if (!snapshot.participants().contains(last.getAgentId())) {
+            throw new ConflictException("The agent of this step is not a participant of this workflow.");
+        }
+        executionService.ensureRunnable(organizationId, last.getAgentId()); // ACTIVE agent, valid and enabled provider
+        last.retryDueAt(now, user.userId(), now);
+        run.resumeFromRecovery(now);
+        audit.record(organizationId, user.userId(), "workflow.step.retry-requested", "workflow", runId,
+                AgentSupport.details("workflowRunId", runId, "step", rank, "attempt", last.getAttempt() + 1, "manualRetry", run.getManualRetries()));
+        scheduler.appendStatus(run, "A person asked to retry step " + rank + " (manual retry " + run.getManualRetries() + " of 3).", now);
+        scheduler.advance(run); // revalidates the requester and launches the new attempt now
+        return RunView.of(run);
+    }
+
+    @Transactional(readOnly = true)
+    public WorkflowViews.RunSummaryView summary(UUID organizationId, UUID runId, AuthenticatedUser user) {
+        access.require(organizationId, user, Permission.WORKFLOW_READ);
+        WorkflowRun run = load(organizationId, runId);
+        List<WorkflowStep> all = steps.findByOrganizationIdAndRunIdOrderByStepRankAscAttemptAsc(organizationId, runId);
+        Instant now = Instant.now(clock);
+        List<WorkflowViews.AttemptUsageView> attempts = new java.util.ArrayList<>();
+        Map<String, Integer> byCategory = new java.util.TreeMap<>();
+        long in = 0, out = 0, coordinator = 0, workers = 0;
+        int auto = 0, manual = 0, failed = 0;
+        Instant nextRetry = null;
+        for (WorkflowStep s : all) {
+            AgentExecution e = executionRepository.findByOrganizationIdAndId(organizationId, s.getExecutionId()).orElse(null);
+            long i = e == null || e.getInputTokens() == null ? 0 : e.getInputTokens();
+            long o = e == null || e.getOutputTokens() == null ? 0 : e.getOutputTokens();
+            in += i;
+            out += o;
+            if (WorkflowScheduler.COORDINATOR.equals(s.getRole())) {
+                coordinator += i + o;
+            } else {
+                workers += i + o;
+            }
+            if ("AUTO_RETRY".equals(s.getLaunchReason())) {
+                auto++;
+            } else if ("MANUAL_RETRY".equals(s.getLaunchReason())) {
+                manual++;
+            }
+            if (s.getStatus() == WorkflowStepStatus.FAILED) {
+                failed++;
+                byCategory.merge(String.valueOf(s.getFailureCategory()), 1, Integer::sum);
+                if (s.getNextAttemptAt() != null && run.getStatus().isOpen() && s.getId().equals(all.getLast().getId())) {
+                    nextRetry = s.getNextAttemptAt();
+                }
+            }
+            Instant end = s.getCompletedAt() != null ? s.getCompletedAt() : (run.getStatus().isOpen() ? now : null);
+            Long duration = end == null || s.getStartedAt() == null ? null : java.time.Duration.between(s.getStartedAt(), end).toMillis();
+            attempts.add(new WorkflowViews.AttemptUsageView(s.getStepRank(), s.getAttempt(), s.getRole(), s.getLaunchReason(), s.getStatus(),
+                    s.getErrorCode(), s.getFailureCategory(), s.getRetrySafe(), s.getExecutionId(), duration, i, o));
+        }
+        Instant from = run.getStartedAt() != null ? run.getStartedAt() : run.getCreatedAt();
+        Instant until = run.getCompletedAt() != null ? run.getCompletedAt() : now;
+        return new WorkflowViews.RunSummaryView(run.getId(), run.getMode(), run.getStatus(), run.getFailurePolicy(), run.getCreatedAt(),
+                run.getStartedAt(), run.getCompletedAt(), run.getDeadlineAt(), java.time.Duration.between(from, until).toMillis(), all.size(), auto,
+                manual, failed, byCategory, in, out, coordinator, workers, run.getTokenBudget(),
+                Math.max(0, (long) run.getTokenBudget() - run.getTokensUsed()), nextRetry,
+                run.getStatus() == WorkflowRunStatus.WAITING_RECOVERY, run.getErrorCode(), attempts);
     }
 
     private WorkflowRun load(UUID organizationId, UUID runId) {
