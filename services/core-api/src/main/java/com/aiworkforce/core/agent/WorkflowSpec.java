@@ -32,7 +32,34 @@ final class WorkflowSpec {
 
     /** Everything a run needs, frozen when it starts. */
     record Snapshot(UUID definitionId, int version, String name, List<Step> steps, List<UUID> participants, int maxSteps,
-            int maxRetriesPerStep, int tokenBudget, int deadlineSeconds) {
+            int maxRetriesPerStep, int tokenBudget, int deadlineSeconds, String mode, UUID coordinatorAgentId,
+            List<Member> members) {
+
+        /** Snapshots written by C3.1 carry no mode: they are pipelines. */
+        boolean coordinated() {
+            return WorkflowMode.COORDINATED.name().equals(mode);
+        }
+
+        Member member(String ref) {
+            if (members == null || ref == null) {
+                return null;
+            }
+            return members.stream().filter(m -> m.ref().equalsIgnoreCase(ref.strip())).findFirst().orElse(null);
+        }
+
+        Member memberOf(UUID agentId) {
+            if (members == null) {
+                return null;
+            }
+            return members.stream().filter(m -> m.agentId().equals(agentId)).findFirst().orElse(null);
+        }
+    }
+
+    /**
+     * A participant of a coordinated workflow as the COORDINATOR sees it: an opaque, workflow-scoped reference and safe
+     * descriptions. The internal agent id never reaches the model; the Core API maps the reference back.
+     */
+    record Member(String ref, UUID agentId, String name, String title, String description, boolean coordinator) {
     }
 
     static String toJson(Object value) {

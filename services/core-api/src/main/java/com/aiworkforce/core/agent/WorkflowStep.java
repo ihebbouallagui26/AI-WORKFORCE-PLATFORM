@@ -83,6 +83,11 @@ public class WorkflowStep {
 
     WorkflowStep(UUID id, UUID organizationId, UUID runId, int stepRank, int attempt, String name, UUID agentId,
             UUID executionId, String inputRanks, Instant now) {
+        this(id, organizationId, runId, stepRank, attempt, name, agentId, executionId, inputRanks, "WORKER", now);
+    }
+
+    WorkflowStep(UUID id, UUID organizationId, UUID runId, int stepRank, int attempt, String name, UUID agentId,
+            UUID executionId, String inputRanks, String role, Instant now) {
         this.id = id;
         this.organizationId = organizationId;
         this.runId = runId;
@@ -90,7 +95,7 @@ public class WorkflowStep {
         this.attempt = attempt;
         this.name = name;
         this.agentId = agentId;
-        this.role = "WORKER";
+        this.role = role;
         this.executionId = executionId;
         this.status = WorkflowStepStatus.RUNNING;
         this.inputRanks = inputRanks;

@@ -86,12 +86,32 @@ class AgentExecutionContext(WireModel):
 # ---- Execution run contracts (C1): the orchestrator drives an execution through the Core API ----------
 
 
+class PlatformAction(WireModel):
+    """A platform-native action (C3.2) offered ONLY to a workflow coordinator turn. It is not an MCP tool: the Core
+    API defines it, validates it and records it; the orchestrator only forwards what the provider asked for."""
+
+    name: str
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowActionResult(WireModel):
+    """The Core API's normalized answer to a forwarded coordinator action."""
+
+    action: str
+    status: Literal["ACCEPTED", "REJECTED"] | str
+    code: str = ""
+    message: str = ""
+
+
 class ExecutionStarted(WireModel):
     """PENDING to RUNNING answer: the instruction and the agent it was given for."""
 
     execution_id: UUID
     agent_id: UUID
     task: str
+    workflow_role: str | None = None
+    platform_actions: list[PlatformAction] = Field(default_factory=list)
 
 
 class ExecutionCredential(WireModel):

@@ -64,11 +64,13 @@ class ToolCallCoordinator {
     private final AuditLog audit;
     private final ExecutionProperties properties;
     private final Clock clock;
+    private final WorkflowStepRepository workflowSteps;
 
     ToolCallCoordinator(ExecutionRepository executions, ToolInvocationRepository invocations,
             ToolApprovalRepository approvals, ToolDefinitionRepository toolDefinitions, ToolGrantRepository grants,
             AgentSupport support, SensitivePayloadVault vault, AuditLog audit, ExecutionProperties properties,
-            Clock clock) {
+            Clock clock, WorkflowStepRepository workflowSteps) {
+        this.workflowSteps = workflowSteps;
         this.executions = executions;
         this.invocations = invocations;
         this.approvals = approvals;
@@ -115,6 +117,14 @@ class ToolCallCoordinator {
         Agent agent = support.load(organizationId, execution.getAgentId());
         if (agent.getStatus() != AgentStatus.ACTIVE) {
             throw new ConflictException("The agent is no longer active.");
+        }
+        // A workflow coordinator turn has ONLY the two platform actions: it never reaches an MCP tool.
+        if (workflowSteps.findByOrganizationIdAndExecutionId(organizationId, executionId)
+                .filter(step -> WorkflowScheduler.COORDINATOR.equals(step.getRole())).isPresent()) {
+            audit.record(organizationId, null, "agent.tool.denied", "agent", agent.getId(), AgentSupport.details(
+                    "executionId", executionId, "code", "COORDINATOR_TOOLS_NOT_ALLOWED"));
+            return new ToolCallDecision(null, "DENIED", "COORDINATOR_TOOLS_NOT_ALLOWED",
+                    "A workflow coordinator can only delegate or finish.", null, null);
         }
         JsonNode args = arguments == null || arguments.isNull() ? JsonNodeFactory.instance.objectNode()
                 : arguments;

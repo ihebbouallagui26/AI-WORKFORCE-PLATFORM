@@ -39,6 +39,7 @@ public class WorkflowController {
 
     @Schema(name = "CreateWorkflowRequest")
     public record CreateRequest(@NotBlank @Size(max = 120) String name, @Size(max = 2000) String description,
+            @Schema(description = "PIPELINE (default, static ordered steps) or COORDINATED (a chosen coordinator agent delegates)") WorkflowMode mode,
             @Min(1) @Max(8) Integer maxSteps, @Min(0) @Max(2) Integer maxRetriesPerStep,
             @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds) {
     }
@@ -50,7 +51,8 @@ public class WorkflowController {
     }
 
     @Schema(name = "SetWorkflowParticipantsRequest")
-    public record ParticipantsRequest(@Size(max = 16) List<UUID> agentIds) {
+    public record ParticipantsRequest(@Size(max = 16) List<UUID> agentIds,
+            @Schema(description = "COORDINATED workflows only: the coordinator, who must also be listed in agentIds") UUID coordinatorAgentId) {
     }
 
     @Schema(name = "WorkflowStepInput")
@@ -73,7 +75,7 @@ public class WorkflowController {
     @Operation(operationId = "createWorkflow", summary = "Create a workflow definition (no participants or steps yet)")
     public DefinitionView create(@PathVariable UUID organizationId, AuthenticatedUser user, @Valid @RequestBody CreateRequest request) {
         return workflows.create(organizationId, user, request.name(), request.description(), request.maxSteps(),
-                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds());
+                request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.mode());
     }
 
     @GetMapping
@@ -103,7 +105,7 @@ public class WorkflowController {
     @Operation(operationId = "setWorkflowParticipants", summary = "Replace the participants: exactly the agents chosen here, never inherited from a team")
     public DefinitionView setParticipants(@PathVariable UUID organizationId, @PathVariable UUID workflowId, AuthenticatedUser user,
             @Valid @RequestBody ParticipantsRequest request) {
-        return workflows.setParticipants(organizationId, workflowId, user, request.agentIds());
+        return workflows.setParticipants(organizationId, workflowId, user, request.agentIds(), request.coordinatorAgentId());
     }
 
     @PutMapping(path = "/{workflowId}/steps", consumes = MediaType.APPLICATION_JSON_VALUE)

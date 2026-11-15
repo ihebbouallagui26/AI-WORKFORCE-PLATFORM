@@ -44,6 +44,7 @@ public class WorkflowRunService {
     private final WorkflowRunRepository runs;
     private final WorkflowStepRepository steps;
     private final WorkflowMessageRepository messages;
+    private final WorkflowActionRepository actionRepository;
     private final AgentRepository agents;
     private final ExecutionService executionService;
     private final WorkflowScheduler scheduler;
@@ -54,7 +55,7 @@ public class WorkflowRunService {
     private final Clock clock;
 
     public WorkflowRunService(WorkflowDefinitionRepository definitions, WorkflowParticipantRepository participants,
-            WorkflowRunRepository runs, WorkflowStepRepository steps, WorkflowMessageRepository messages, AgentRepository agents,
+            WorkflowRunRepository runs, WorkflowStepRepository steps, WorkflowMessageRepository messages, WorkflowActionRepository actionRepository, AgentRepository agents,
             ExecutionService executionService, WorkflowScheduler scheduler, TenantAccessService access,
             OrganizationLock organizationLock, AuditLog audit, WorkflowProperties properties, Clock clock) {
         this.definitions = definitions;
@@ -62,6 +63,7 @@ public class WorkflowRunService {
         this.runs = runs;
         this.steps = steps;
         this.messages = messages;
+        this.actionRepository = actionRepository;
         this.agents = agents;
         this.executionService = executionService;
         this.scheduler = scheduler;
@@ -100,7 +102,12 @@ public class WorkflowRunService {
         List<WorkflowSpec.Step> stepList = WorkflowSpec.parseSteps(definition.getSteps());
         Set<UUID> participantAgents = participants.findByOrganizationIdAndDefinitionId(organizationId, definitionId).stream()
                 .map(WorkflowParticipant::getAgentId).collect(Collectors.toCollection(HashSet::new));
-        validateComplete(definition, stepList, participantAgents);
+        boolean coordinated = definition.getMode() == WorkflowMode.COORDINATED;
+        if (coordinated) {
+            validateCoordinated(definition, participantAgents);
+        } else {
+            validateComplete(definition, stepList, participantAgents);
+        }
         for (UUID agentId : participantAgents) {
             try {
                 executionService.ensureRunnable(organizationId, agentId); // ACTIVE agent, valid provider
@@ -115,17 +122,45 @@ public class WorkflowRunService {
         }
 
         Instant now = Instant.now(clock);
+        List<WorkflowSpec.Member> members = coordinated ? members(organizationId, definition, participantAgents) : List.of();
         WorkflowSpec.Snapshot snapshot = new WorkflowSpec.Snapshot(definition.getId(), definition.getVersion(), definition.getName(),
                 stepList, participantAgents.stream().sorted().toList(), definition.getMaxSteps(), definition.getMaxRetriesPerStep(),
-                definition.getTokenBudget(), definition.getDeadlineSeconds());
+                definition.getTokenBudget(), definition.getDeadlineSeconds(), definition.getMode().name(),
+                coordinated ? definition.getCoordinatorAgentId() : null, members);
         // save() merges an entity with an assigned id and returns the MANAGED copy: only that one may be modified afterwards.
         WorkflowRun run = runs.save(new WorkflowRun(UUID.randomUUID(), definition, WorkflowSpec.toJson(snapshot), user.userId(),
-                requestId, WorkflowText.mask(cleaned), stepList.size(), MDC.get(RequestIdFilter.MDC_KEY), now));
+                requestId, WorkflowText.mask(cleaned), coordinated ? definition.getMaxSteps() : stepList.size(), MDC.get(RequestIdFilter.MDC_KEY), now));
         scheduler.appendObjective(run, now);
         audit.record(organizationId, user.userId(), "workflow.run.requested", "workflow", run.getId(), AgentSupport.details(
                 "workflowRunId", run.getId(), "definitionId", definitionId, "version", definition.getVersion(), "steps", stepList.size()));
         scheduler.advance(run); // first step now; if the organization is at its execution limit the next pass retries
         return RunView.of(run);
+    }
+
+    private static void validateCoordinated(WorkflowDefinition definition, Set<UUID> participantAgents) {
+        UUID coordinator = definition.getCoordinatorAgentId();
+        if (coordinator == null || !participantAgents.contains(coordinator)) {
+            throw new ConflictException("A coordinated workflow needs a coordinator among its participants.");
+        }
+        if (participantAgents.size() < 2) {
+            throw new ConflictException("A coordinated workflow needs at least one worker besides its coordinator.");
+        }
+    }
+
+    /** Opaque, workflow-scoped references: the coordinator only ever sees these, never an agent id. */
+    private List<WorkflowSpec.Member> members(UUID organizationId, WorkflowDefinition definition, Set<UUID> participantAgents) {
+        Map<UUID, Agent> byId = new HashMap<>();
+        agents.findByOrganizationIdAndIdIn(organizationId, List.copyOf(participantAgents)).forEach(a -> byId.put(a.getId(), a));
+        List<WorkflowSpec.Member> out = new java.util.ArrayList<>();
+        Agent coordinatorAgent = byId.get(definition.getCoordinatorAgentId());
+        out.add(new WorkflowSpec.Member("coordinator", coordinatorAgent.getId(), coordinatorAgent.getName(), coordinatorAgent.getTitle(),
+                coordinatorAgent.getDescription(), true));
+        int n = 1;
+        for (UUID id : participantAgents.stream().filter(i -> !i.equals(definition.getCoordinatorAgentId())).sorted().toList()) {
+            Agent a = byId.get(id);
+            out.add(new WorkflowSpec.Member("worker_" + n++, a.getId(), a.getName(), a.getTitle(), a.getDescription(), false));
+        }
+        return out;
     }
 
     private static void validateComplete(WorkflowDefinition definition, List<WorkflowSpec.Step> stepList, Set<UUID> participantAgents) {
@@ -168,6 +203,13 @@ public class WorkflowRunService {
         agents.findByOrganizationIdAndIdIn(organizationId, page.getContent().stream().map(WorkflowStep::getAgentId).distinct().toList())
                 .forEach(a -> names.put(a.getId(), a.getName()));
         return page.map(s -> StepView.of(s, names.get(s.getAgentId())));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<WorkflowViews.ActionView> actions(UUID organizationId, UUID runId, AuthenticatedUser user, Pageable pageable) {
+        access.require(organizationId, user, Permission.WORKFLOW_READ);
+        load(organizationId, runId);
+        return actionRepository.findByOrganizationIdAndRunId(organizationId, runId, pageable).map(WorkflowViews.ActionView::of);
     }
 
     @Transactional(readOnly = true)

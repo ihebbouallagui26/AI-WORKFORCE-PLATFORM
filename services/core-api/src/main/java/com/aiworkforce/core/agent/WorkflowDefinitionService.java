@@ -57,13 +57,14 @@ public class WorkflowDefinitionService {
 
     @Transactional
     public DefinitionView create(UUID organizationId, AuthenticatedUser user, String name, String description, Integer maxSteps,
-            Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds) {
+            Integer maxRetriesPerStep, Integer tokenBudget, Integer deadlineSeconds, WorkflowMode mode) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = new WorkflowDefinition(UUID.randomUUID(), organizationId, cleanName(name),
                 description == null ? "" : description.strip(), limit(maxSteps, 8, 1, WorkflowSpec.MAX_STEPS, "maxSteps"),
                 limit(maxRetriesPerStep, 0, 0, 2, "maxRetriesPerStep"),
                 limit(tokenBudget, DEFAULT_TOKEN_BUDGET, 1000, 10_000_000, "tokenBudget"),
-                limit(deadlineSeconds, DEFAULT_DEADLINE_SECONDS, 30, 86_400, "deadlineSeconds"), user.userId(), Instant.now(clock));
+                limit(deadlineSeconds, DEFAULT_DEADLINE_SECONDS, 30, 86_400, "deadlineSeconds"), user.userId(),
+                mode == null ? WorkflowMode.PIPELINE : mode, Instant.now(clock));
         definitions.save(definition);
         audit.record(organizationId, user.userId(), "workflow.created", "workflow", definition.getId(),
                 AgentSupport.details("name", definition.getName()));
@@ -105,13 +106,21 @@ public class WorkflowDefinitionService {
      * the person configuring (agent.read), be ACTIVE and have a valid, enabled primary provider.
      */
     @Transactional
-    public DefinitionView setParticipants(UUID organizationId, UUID id, AuthenticatedUser user, List<UUID> agentIds) {
+    public DefinitionView setParticipants(UUID organizationId, UUID id, AuthenticatedUser user, List<UUID> agentIds,
+            UUID coordinatorAgentId) {
         OrganizationAccess granted = access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         granted.require(Permission.AGENT_READ);
         WorkflowDefinition definition = lock(organizationId, id);
         Set<UUID> wanted = new LinkedHashSet<>(agentIds == null ? List.of() : agentIds);
         if (wanted.size() > 16) {
             throw new BadRequestException("A workflow may have at most 16 participants.");
+        }
+        if (definition.getMode() == WorkflowMode.COORDINATED) {
+            if (coordinatorAgentId == null || !wanted.contains(coordinatorAgentId)) {
+                throw new BadRequestException("A coordinated workflow needs a coordinator, and the coordinator must be one of the participants.");
+            }
+        } else if (coordinatorAgentId != null) {
+            throw new BadRequestException("Only a coordinated workflow has a coordinator.");
         }
         for (UUID agentId : wanted) {
             support.load(organizationId, agentId); // 404 for an agent of another organization
@@ -140,6 +149,9 @@ public class WorkflowDefinitionService {
             }
         }
         definition.participantsChanged(now);
+        if (definition.getMode() == WorkflowMode.COORDINATED) {
+            definition.changeCoordinator(coordinatorAgentId, now);
+        }
         audit.record(organizationId, user.userId(), "workflow.participants.updated", "workflow", id,
                 AgentSupport.details("participants", wanted.size(), "version", definition.getVersion()));
         return view(organizationId, definition);
@@ -149,6 +161,9 @@ public class WorkflowDefinitionService {
     public DefinitionView setSteps(UUID organizationId, UUID id, AuthenticatedUser user, List<WorkflowSpec.StepInput> submitted) {
         access.require(organizationId, user, Permission.WORKFLOW_MANAGE);
         WorkflowDefinition definition = lock(organizationId, id);
+        if (definition.getMode() == WorkflowMode.COORDINATED) {
+            throw new ConflictException("A coordinated workflow has no static steps: its coordinator decides what happens next.");
+        }
         Set<UUID> participantAgents = participants.findByOrganizationIdAndDefinitionId(organizationId, id).stream()
                 .map(WorkflowParticipant::getAgentId).collect(Collectors.toSet());
         List<WorkflowSpec.Step> steps = WorkflowSpec.normalize(submitted, participantAgents, definition.getMaxSteps());

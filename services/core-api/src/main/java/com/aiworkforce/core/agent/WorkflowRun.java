@@ -47,6 +47,10 @@ public class WorkflowRun {
     @Column(nullable = false)
     private WorkflowRunStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false)
+    private WorkflowMode mode;
+
     @Column(name = "total_steps", nullable = false, updatable = false)
     private int totalSteps;
 
@@ -108,6 +112,7 @@ public class WorkflowRun {
         this.definitionId = definition.getId();
         this.definitionVersion = definition.getVersion();
         this.snapshot = snapshot;
+        this.mode = definition.getMode();
         this.requestedBy = requestedBy;
         this.requestId = requestId;
         this.objective = objective;
@@ -197,6 +202,7 @@ public class WorkflowRun {
     public UUID getOrganizationId() { return organizationId; }
     public UUID getDefinitionId() { return definitionId; }
     public int getDefinitionVersion() { return definitionVersion; }
+    public WorkflowMode getMode() { return mode; }
     public String getSnapshot() { return snapshot; }
     public UUID getRequestedBy() { return requestedBy; }
     public String getRequestId() { return requestId; }
