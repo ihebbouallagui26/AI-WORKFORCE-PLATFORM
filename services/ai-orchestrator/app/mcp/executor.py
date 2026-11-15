@@ -30,6 +30,7 @@ from mcp import Client, MCPError
 
 from app.core.errors import OrchestratorError
 from app.core.logging import get_logger
+from app.mcp.bounded_stdio import BoundedStdioTransport, McpOutputLimits, TransportMonitor
 from app.mcp.configuration import McpServerConfig, launch_parameters
 from app.mcp.registry import ToolInfo, ToolRegistry, validate_tool_metadata
 
@@ -37,6 +38,8 @@ log = get_logger("mcp-executor")
 
 _NON_TEXT = "[non-text content omitted]"
 _METHOD_NOT_FOUND = -32601
+# JSON-RPC errors that a server returns BEFORE any tool code runs (parse error, invalid request, method not found, invalid params).
+_NOT_EXECUTED = frozenset({-32700, -32600, -32601, -32602})
 
 
 class ToolExecutionError(OrchestratorError):
@@ -46,9 +49,29 @@ class ToolExecutionError(OrchestratorError):
     code = "tool-failed"
     default_message = "The tool failed."
 
-    def __init__(self, error_code: str, message: str) -> None:
+    def __init__(self, error_code: str, message: str, *, outcome_unknown: bool = False) -> None:
         super().__init__(message)
         self.error_code = error_code
+        # True only when the request MAY have reached the tool server and no trustworthy result came back: the external action
+        # may have happened. The caller reports it to the Core API as OUTCOME_UNKNOWN and never repeats the call.
+        self.outcome_unknown = outcome_unknown
+
+
+class ToolOutputLimitError(ToolExecutionError):
+    """The server exceeded a hard output limit (stdout message or stderr flood) and its process was terminated.
+
+    The call had already been STARTED, so the tool may have produced its external effect while its result is lost and cannot be
+    trusted. It is therefore reported with the Core API's unknown-outcome code, never as a plain failure or a cancellation, and the
+    caller must neither retry nor repeat it. ``reason`` is a safe constant; nothing of the offending output is kept.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            "OUTCOME_UNKNOWN",
+            "The tool server exceeded the output limit and was stopped: whether the action took effect is unknown. It is not repeated.",
+            outcome_unknown=True,
+        )
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -80,8 +103,10 @@ def normalize_result(result: Any, max_bytes: int) -> ToolOutput:
 class _ServerConnection:
     """One MCP server: a background task owns the connection from start to clean shutdown."""
 
-    def __init__(self, config: McpServerConfig) -> None:
+    def __init__(self, config: McpServerConfig, limits: McpOutputLimits) -> None:
         self.config = config
+        self.limits = limits
+        self.monitor: TransportMonitor | None = None
         self.registry = ToolRegistry()
         self.client: Client | None = None
         self._ready = asyncio.Event()
@@ -103,7 +128,9 @@ class _ServerConnection:
 
     async def _own(self) -> None:
         try:
-            async with Client(launch_parameters(self.config), read_timeout_seconds=self.config.timeout_seconds) as client:
+            transport = BoundedStdioTransport(launch_parameters(self.config), self.limits, label=self.config.name)
+            self.monitor = transport.monitor
+            async with Client(transport, read_timeout_seconds=self.config.timeout_seconds) as client:
                 self.client = client
                 listed = await client.list_tools()
                 for tool in listed.tools:
@@ -156,8 +183,9 @@ class _ServerConnection:
 class McpServerManager:
     """Connection management, discovery, bounded concurrency and invocation of allowlisted MCP servers."""
 
-    def __init__(self, configs: list[McpServerConfig], *, max_concurrent_calls: int = 4) -> None:
+    def __init__(self, configs: list[McpServerConfig], *, max_concurrent_calls: int = 4, limits: McpOutputLimits | None = None) -> None:
         self._configs = {c.name: c for c in configs}
+        self._limits = limits or McpOutputLimits()
         self._connections: dict[str, _ServerConnection] = {}
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(max_concurrent_calls)
@@ -177,7 +205,7 @@ class McpServerManager:
             if current is not None:
                 log.warning("mcp_reconnect", server=server)
                 await current.stop()
-            fresh = _ServerConnection(config)
+            fresh = _ServerConnection(config, self._limits)
             await fresh.start()
             self._connections[server] = fresh
             return fresh
@@ -198,21 +226,57 @@ class McpServerManager:
         if connection.registry.get(server, tool) is None:
             raise ToolExecutionError("TOOL_NOT_FOUND", "The tool server does not expose this tool.")
         async with self._semaphore:
+            monitor = connection.monitor
+            requests_before = monitor.begin_call() if monitor is not None else 0
             try:
                 async with asyncio.timeout(timeout_seconds):
                     assert connection.client is not None
                     result = await connection.client.call_tool(tool, arguments)
-            except TimeoutError as exc:
-                # The server may still be working: drop the connection (and its child process) instead of reusing it.
+            except Exception as exc:  # noqa: BLE001 - every failure is classified below by what could have happened
+                # The server may still be working or broken: drop the connection (and its child process) instead of reusing it.
                 await self._discard(server, connection)
-                raise ToolExecutionError("TOOL_TIMEOUT", "The tool did not finish in time.") from exc
-            except (MCPError, OSError, RuntimeError) as exc:
-                await self._discard(server, connection)
-                raise ToolExecutionError("MCP_UNAVAILABLE", "The tool server failed during the call.") from exc
+                raise self._classify_failure(connection, requests_before, exc) from exc
+            finally:
+                if monitor is not None:
+                    monitor.end_call()
         output = normalize_result(result, max_output_bytes)
         if output.is_error:
-            raise ToolExecutionError("TOOL_ERROR", truncate_utf8(output.text or "The tool reported an error.", 300)[0])
+            # The tool's own error text is untrusted tool OUTPUT: it is not forwarded (it would be stored by the Core API as the call's
+            # error message, i.e. outside the encrypted result), and the model is only told the code anyway.
+            raise ToolExecutionError("TOOL_ERROR", "The tool reported an error.")
         return output
+
+    @staticmethod
+    def _classify_failure(connection: _ServerConnection, requests_before: int, exc: BaseException) -> ToolExecutionError:
+        """What could have happened to the external action, from the evidence the transport recorded.
+
+        * the transport enforced an output limit (the request was sent)  -> unknown outcome;
+        * NO request reached the server's stdin during this call          -> provably nothing was executed: a plain failure;
+        * the request may have been sent and the server answered with a protocol-level REJECTION (parse error, invalid request,
+          method not found, invalid params: refused before any tool code runs)  -> known failure, not executed;
+        * the request may have been sent and no trustworthy answer came back (timeout, connection lost, crash, internal error,
+          unreadable answer) -> UNKNOWN outcome: never retried, never replayed.
+        """
+        monitor = connection.monitor
+        if monitor is not None and monitor.violation is not None:
+            return ToolOutputLimitError(monitor.violation.kind)
+        dispatched = monitor is not None and monitor.stdin_started > requests_before
+        if isinstance(exc, TimeoutError):
+            if not dispatched:
+                return ToolExecutionError("TOOL_TIMEOUT", "The tool did not finish in time.")
+            return ToolExecutionError(
+                "TOOL_TIMEOUT", "The tool did not finish in time: whether the action took effect is unknown. It is not repeated.",
+                outcome_unknown=True,
+            )
+        if not dispatched:
+            return ToolExecutionError("MCP_UNAVAILABLE", "The tool server failed before the call could be sent.")
+        if isinstance(exc, MCPError) and exc.code in _NOT_EXECUTED:
+            return ToolExecutionError("MCP_UNAVAILABLE", "The tool server rejected the request.")
+        return ToolExecutionError(
+            "MCP_UNAVAILABLE",
+            "The tool server failed during the call: whether the action took effect is unknown. It is not repeated.",
+            outcome_unknown=True,
+        )
 
     async def _discard(self, server: str, connection: _ServerConnection) -> None:
         async with self._lock:

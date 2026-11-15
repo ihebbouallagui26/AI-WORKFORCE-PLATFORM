@@ -13,7 +13,7 @@ import psycopg
 import pytest
 import respx
 
-from app.core.crypto import StateSealer
+from app.core.crypto import StateBinding, StateSealer
 from app.mcp.executor import ToolOutput
 from app.orchestration.checkpointer.postgres import open_postgres_checkpointer
 from tests.test_postgres_checkpoints import database, settings_for  # noqa: F401 - the shared Postgres fixture
@@ -65,6 +65,12 @@ def stored_blob(database) -> str:  # noqa: F811
     return rows[0][0]
 
 
+def binding(core, execution=EXECUTION) -> StateBinding:
+    """The identity the sealed state is bound to: organization, execution, thread and the invocation the run is paused on."""
+    invocation = uuid.UUID(core.invocation_for_call["toolu_note"])
+    return StateBinding(organization_id=ORG, execution_id=execution, thread_id=f"{ORG}:{EXECUTION}", invocation_id=invocation)
+
+
 async def lifecycle_a_pauses(database):  # noqa: F811
     """Lifecycle A: the run asks for an approval-required tool and pauses; everything is closed cleanly afterwards."""
     core = CoreScript(respx.mock)
@@ -90,7 +96,7 @@ async def test_a_paused_run_is_stored_sealed_and_resumes_in_a_new_lifecycle_with
     sealed = stored_blob(database)
     assert set(sealed) <= set("0123456789abcdef") and len(sealed) > 100
     # It is genuinely the sealed conversation: only the right key and the right (organization, execution) open it.
-    assert ARGUMENT.encode() in StateSealer(KEY).open(sealed, StateSealer.aad(ORG, EXECUTION))
+    assert ARGUMENT.encode() in StateSealer(KEY).open(sealed, binding(core))
 
     # Lifecycle B: nothing in memory survives; same key, brand new pool/checkpointer/runner/manager.
     core.decide("toolu_note", "APPROVED")
@@ -121,7 +127,7 @@ async def test_a_different_key_cannot_read_the_state_and_fails_safely(database):
     for forbidden in (*FORBIDDEN, KEY.hex(), OTHER_KEY.hex()):
         assert forbidden not in leaked
     # The stored state was not modified or destroyed by the failed attempt: the right key still opens it.
-    assert ARGUMENT.encode() in StateSealer(KEY).open(stored_blob(database), StateSealer.aad(ORG, EXECUTION))
+    assert ARGUMENT.encode() in StateSealer(KEY).open(stored_blob(database), binding(core))
 
 
 @respx.mock
@@ -129,7 +135,7 @@ async def test_a_different_key_cannot_read_the_state_and_fails_safely(database):
 async def test_a_tampered_sealed_state_in_postgres_is_rejected(database, tamper):  # noqa: F811
     core = await lifecycle_a_pauses(database)
     sealed = stored_blob(database)
-    other = StateSealer(KEY).seal(b'{"system":"s","messages":[]}', StateSealer.aad(ORG, uuid.uuid4()))
+    other = StateSealer(KEY).seal(b'{"system":"s","messages":[]}', binding(core, uuid.uuid4()))
     forged = {
         "flip-last-byte": sealed[:-2] + ("00" if sealed[-2:] != "00" else "ff"),
         "truncate": sealed[:-8],

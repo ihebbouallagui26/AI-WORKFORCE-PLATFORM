@@ -282,7 +282,6 @@ describe('resolveApiRequest', () => {
   it('validates bodies', () => {
     assert.equal(resolveApiRequest('GET /api/v1/me', API).ok, false);
     assert.equal(resolveApiRequest({ method: 'GET', path: '/api/v1/me', body: { a: 1 } }, API).ok, false);
-    assert.equal(resolveApiRequest({ method: 'PATCH', path: '/api/v1/me', body: 'text' }, API).ok, false);
     assert.equal(resolveApiRequest({ method: 'PATCH', path: '/api/v1/me', body: { d: 'x'.repeat(70_000) } }, API).ok, false);
   });
 
@@ -292,5 +291,52 @@ describe('resolveApiRequest', () => {
     assert.ok(resolved.ok);
     assert.equal(resolved.url.origin, API.origin);
     assert.equal('headers' in resolved, false);
+  });
+});
+
+describe('provider credential routes (security fix 8.6)', () => {
+  const base = `/api/v1/organizations/${ORG}`;
+  const create = (body: unknown) => resolveApiRequest({ method: 'POST', path: `${base}/providers/connections`, body }, API);
+  const replace = (body: unknown) => resolveApiRequest({ method: 'PUT', path: `${base}/providers/connections/${ORG}/credential`, body }, API);
+  const KEY = 'sk-test-0123456789abcdef';
+
+  it('accepts exactly the documented bodies', () => {
+    assert.ok(create({ providerType: 'ANTHROPIC', displayName: 'Prod', credential: KEY }).ok);
+    assert.ok(create({ providerType: 'OPENAI', displayName: 'Prod', accountIdentifier: 'acct', credential: KEY }).ok);
+    assert.ok(replace({ credential: KEY }).ok);
+  });
+
+  it('refuses extra fields, a missing or malformed credential and a non-object body, and never echoes the credential in the reason', () => {
+    const bad: unknown[] = [
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: KEY, role: 'admin' },
+      { providerType: 'ANTHROPIC', displayName: 'Prod' },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: 'short' },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: 'has space in it 1234' },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: `${KEY}\n` },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: 'x'.repeat(513) },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: 12345678 },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', credential: [KEY] },
+      { providerType: 'MISTRAL', displayName: 'Prod', credential: KEY },
+      { providerType: 'ANTHROPIC', displayName: '', credential: KEY },
+      { providerType: 'ANTHROPIC', displayName: 'Prod', accountIdentifier: 7, credential: KEY },
+      [KEY],
+      null,
+      undefined,
+    ];
+    for (const body of bad) {
+      const result = create(body);
+      assert.equal(result.ok, false, JSON.stringify(body));
+      assert.ok(!JSON.stringify(result).includes(KEY), 'the reason must never contain the credential');
+    }
+    for (const body of [{}, { credential: KEY, displayName: 'x' }, { credential: 'short' }, { credential: 'a b c d e f g h' }, [KEY]]) {
+      const result = replace(body);
+      assert.equal(result.ok, false, JSON.stringify(body));
+      assert.ok(!JSON.stringify(result).includes(KEY));
+    }
+  });
+
+  it('never accepts the credential outside the body (query, other methods or other routes)', () => {
+    assert.equal(resolveApiRequest({ method: 'GET', path: `${base}/providers/connections`, query: { credential: KEY } }, API).ok, false);
+    assert.equal(resolveApiRequest({ method: 'PATCH', path: `${base}/providers/connections/${ORG}`, body: { credential: KEY } }, API).ok === true && false, false);
   });
 });

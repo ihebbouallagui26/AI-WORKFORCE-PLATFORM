@@ -93,5 +93,5 @@ class ExecutionGraphState(TypedDict, total=False):
 
 def assert_state_safe(update: dict[str, Any]) -> None:
     """Rejects secret-looking keys and token-looking values before they reach a checkpoint."""
-    if redact(update) != update or REDACTED in repr(update):
+    if redact(update, truncate=False) != update or REDACTED in repr(update):
         raise StateSafetyError("sensitive data cannot be stored in graph state")

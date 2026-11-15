@@ -357,6 +357,33 @@ describe('Providers tab', () => {
     expect(el.innerHTML).not.toContain('sk-test-0123456789abcdef');
   });
 
+  it('never leaks the key into the screen, a toast or the console when the request fails, even if a server echoed it', async () => {
+    const secret = 'sk-test-0123456789abcdef';
+    const { desktop } = setup(ALL);
+    const original = desktop.handler;
+    desktop.handler = (request) =>
+      request.method === 'POST' && request.path.endsWith('/providers/connections')
+        ? { status: 500, body: { title: 'Server error', detail: `rejected ${secret} (Bearer ${secret})`, status: 500 } }
+        : original(request);
+    const logged: unknown[][] = [];
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map((level) => vi.spyOn(console, level).mockImplementation((...args) => void logged.push(args)));
+    const { fixture, el } = render(ProvidersTab);
+    await settle(fixture);
+    button(el, 'Connect a provider')!.click();
+    await settle(fixture);
+    typeInto(el.querySelector('#pc-name') as HTMLInputElement, 'Prod key');
+    const field = el.querySelector('#pc-credential') as HTMLInputElement;
+    typeInto(field, secret);
+    (el.querySelector('#provider-form') as HTMLFormElement).dispatchEvent(new Event('submit'));
+    await settle(fixture);
+    spies.forEach((spy) => spy.mockRestore());
+    const screen = document.body.innerHTML;
+    expect(field.value).toBe('');                                          // cleared even though the request failed
+    expect(screen).not.toContain(secret);                                  // no toast, field or message shows it
+    expect(JSON.stringify(logged)).not.toContain(secret);                  // nothing was written to the console
+    for (const storage of [localStorage, sessionStorage]) expect(JSON.stringify({ ...storage })).not.toContain(secret);
+  });
+
   it('rejects a malformed credential before any request', async () => {
     const { desktop } = setup(ALL);
     const { fixture, el } = render(ProvidersTab);

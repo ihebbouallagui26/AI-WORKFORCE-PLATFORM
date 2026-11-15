@@ -20,6 +20,7 @@ from mcp import Client, MCPError
 from app.clients.contracts import ToolLevel, ToolPermission
 from app.core.errors import ForbiddenError, OrchestratorError, RunTimeoutError, UnavailableError
 from app.core.logging import redact
+from app.mcp.bounded_stdio import BoundedStdioTransport, McpOutputLimits
 from app.mcp.configuration import McpServerConfig, launch_parameters
 from app.orchestration.state.models import ExecutionContext
 
@@ -167,13 +168,16 @@ class McpConnection:
 
 
 @asynccontextmanager
-async def connect(config: McpServerConfig, registry: ToolRegistry | None = None) -> AsyncIterator[McpConnection]:
+async def connect(
+    config: McpServerConfig, registry: ToolRegistry | None = None, limits: McpOutputLimits | None = None
+) -> AsyncIterator[McpConnection]:
     """Connection lifecycle: launch the allowlisted server, handshake within a deadline, always shut it down."""
     registry = registry or ToolRegistry()
     started = False
     try:
         async with asyncio.timeout(config.timeout_seconds) as deadline:
-            async with Client(launch_parameters(config), read_timeout_seconds=config.timeout_seconds) as client:
+            transport = BoundedStdioTransport(launch_parameters(config), limits, label=config.name)
+            async with Client(transport, read_timeout_seconds=config.timeout_seconds) as client:
                 deadline.reschedule(None)  # the deadline only covers startup and handshake
                 started = True
                 yield McpConnection(config, client, registry)

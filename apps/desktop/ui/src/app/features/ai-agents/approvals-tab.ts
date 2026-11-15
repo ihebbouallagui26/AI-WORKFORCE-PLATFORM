@@ -61,7 +61,7 @@ const LABEL: Readonly<Record<ApprovalStatus, string>> = { PENDING: 'Pending', AP
                   <p class="text-tertiary desc">{{ clean(item.description) }}</p>
                   <p class="text-tertiary meta">
                     Execution {{ item.executionId }}
-                    @if (item.decidedAt) { · decided {{ item.decidedAt }}{{ item.decidedBy ? ' by member ' + short(item.decidedBy) : '' }} }
+                    @if (item.decidedAt) { · decided {{ item.decidedAt }}{{ item.decidedBy ? ' by ' + decider(item) : '' }} }
                     @else { · requested {{ item.requestedAt }} }
                     @if (item.invocationStatus) { · tool call {{ invocationLabel(item) }} }
                   </p>
@@ -132,8 +132,9 @@ export class ApprovalsTab {
     return maskSensitive(text);
   }
 
-  protected short(id: string): string {
-    return id.slice(0, 8);
+  /** Who decided: the display name the Core API resolved, or a neutral fallback. Never an identifier. */
+  protected decider(item: ToolApproval): string {
+    return maskSensitive(item.decidedByName) || 'Organization member';
   }
 
   protected invocationLabel(item: ToolApproval): string {

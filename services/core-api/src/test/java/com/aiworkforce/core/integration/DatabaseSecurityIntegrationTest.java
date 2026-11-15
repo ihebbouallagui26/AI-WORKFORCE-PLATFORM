@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("10");
+            assertThat(result.targetSchemaVersion).isEqualTo("11");
         }
     }
 
@@ -723,8 +723,8 @@ class DatabaseSecurityIntegrationTest {
             }
             var result = flyway.apply("latest").migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.migrationsExecuted).isEqualTo(1);
-            assertThat(result.targetSchemaVersion).isEqualTo("10");
+            assertThat(result.migrationsExecuted).isEqualTo(2);   // V10 (parallel execution) and V11 (tool result encryption)
+            assertThat(result.targetSchemaVersion).isEqualTo("11");
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     postgres.getUsername(), postgres.getPassword());
                     java.sql.Statement statement = connection.createStatement()) {
@@ -815,5 +815,55 @@ class DatabaseSecurityIntegrationTest {
         jdbc.update("INSERT INTO roles (id, organization_id, name, description, built_in, created_at, updated_at) "
                 + "VALUES (?, ?, ?, '', false, now(), now())", id, organizationId, name);
         return id;
+    }
+
+    /**
+     * Security fix 8.1: a V10 database holding tool results in PLAINTEXT upgrades to V11 without losing or altering them. V11 is purely
+     * additive (a nullable envelope column and two CHECKs), so legacy rows stay readable and the application's verified backfill converts
+     * them later; a row can never hold both a plaintext and an encrypted result.
+     */
+    @Test
+    void upgradesAnExistingC35DatabaseWithLegacyPlaintextToolResults() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("10").migrate();
+            UUID invocation = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                // A pre-V11 row exactly as the old code wrote it (parents are not needed to prove the column behaviour).
+                statement.execute("SET session_replication_role = replica");
+                statement.execute("INSERT INTO tool_invocations (id, organization_id, execution_id, agent_id, tool_code, tool_call_id, sequence, "
+                        + "status, policy, policy_version, arguments_redacted, arguments_hash, result, result_truncated, requested_at, "
+                        + "started_at, completed_at, updated_at, version) VALUES ('" + invocation + "', '" + UUID.randomUUID() + "', '" + UUID.randomUUID() + "', '"
+                        + UUID.randomUUID() + "', 'diagnostic.echo', 'toolu_legacy', 1, 'SUCCEEDED', 'READ_ONLY', 1, '{}', '" + "a".repeat(64) + "', "
+                        + "'LEGACY-PLAINTEXT-RESULT', false, now(), now(), now(), now(), 0)");
+            }
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("11");
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT result, result_envelope IS NULL FROM tool_invocations WHERE id = '" + invocation + "'")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).isEqualTo("LEGACY-PLAINTEXT-RESULT");            // preserved, byte for byte
+                    assertThat(rows.getBoolean(2)).isTrue();                                       // not converted by the migration itself
+                }
+                assertThatThrownBy(() -> statement.execute("UPDATE tool_invocations SET result_envelope = decode(repeat('ab', 40), 'hex') WHERE id = '" + invocation + "'"))
+                        .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_tool_invocations_one_result_form");
+                statement.execute("UPDATE tool_invocations SET result = NULL, result_envelope = decode(repeat('ab', 40), 'hex') WHERE id = '" + invocation + "'");
+                assertThatThrownBy(() -> statement.execute("UPDATE tool_invocations SET result_envelope = decode('abcd', 'hex') WHERE id = '" + invocation + "'"))
+                        .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_tool_invocations_result_envelope_size");
+            }
+        }
     }
 }

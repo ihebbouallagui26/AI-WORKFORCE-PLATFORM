@@ -89,3 +89,7 @@ The application never logs configuration values. A dedicated database role with 
 - **Desktop CSP:** the Phase A policy `connect-src 'self'` must be extended with the exact API origin (and its WebSocket origin). No wildcard.
 - **Alternative:** route API calls through the Electron main process over IPC. This removes CORS entirely and keeps tokens out of the renderer, at the cost of a larger IPC surface. To be decided in B1. The token-handling rules in §2 apply in both cases.
 - **Certificates:** no `--ignore-certificate-errors` or disabled TLS validation, including in development builds.
+
+## Sprint C3.6 — security hardening summary
+
+Tool results encrypted at rest (V11), recursive display redaction, checkpoint format 2 bound to the paused invocation, bounded MCP output, organization-scoped approver names, Electron credential-body validation in the main process, and fail-closed HTTPS for OIDC keys and provider endpoints outside `dev`/`test`. Findings, severities, evidence and residual risks: `docs/SECURITY_AUDIT.md`. Operations: `docs/OPERATIONS_RUNBOOK.md`. TLS termination: each service verifies the server certificate (chain, expiry, host name, optional internal CA); **no mutual TLS** is implemented or claimed; service identity is OAuth2 client credentials with an allow-list of client ids and an audience check.

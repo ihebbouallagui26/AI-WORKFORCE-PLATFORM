@@ -310,6 +310,40 @@ const ALLOWED_QUERY: Readonly<Record<string, RegExp>> = {
 
 export const MAX_BODY_BYTES = 64 * 1024;
 
+/**
+ * The two operations that carry a provider credential (security fix 8.6). The main process checks the SHAPE of their body before the
+ * request leaves the application: only the documented fields, a credential that matches the platform's own rule (the Core API enforces
+ * the same pattern), nothing else. A compromised or buggy renderer therefore cannot smuggle other data through these routes, and
+ * the main process never logs the body or echoes it in a failure reason.
+ */
+const CREDENTIAL_VALUE = /^[!-~]{8,512}$/;
+const PROVIDER_TYPES = ['ANTHROPIC', 'OPENAI', 'GEMINI'];
+
+function carriesCredential(method: string, path: string): boolean {
+  return (method === 'POST' && path.endsWith('/providers/connections')) || (method === 'PUT' && path.endsWith('/credential'));
+}
+
+function validCredentialBody(method: string, body: unknown): boolean {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return false;
+  }
+  const fields = body as Record<string, unknown>;
+  const names = Object.keys(fields);
+  const allowed = method === 'PUT' ? ['credential'] : ['providerType', 'displayName', 'accountIdentifier', 'credential'];
+  if (!names.every((name) => allowed.includes(name)) || typeof fields['credential'] !== 'string' || !CREDENTIAL_VALUE.test(fields['credential'])) {
+    return false;
+  }
+  if (method === 'PUT') {
+    return true;
+  }
+  const { providerType, displayName, accountIdentifier } = fields;
+  return (
+    typeof providerType === 'string' && PROVIDER_TYPES.includes(providerType) &&
+    typeof displayName === 'string' && displayName.length >= 1 && displayName.length <= 200 &&
+    (accountIdentifier === undefined || (typeof accountIdentifier === 'string' && accountIdentifier.length <= 200))
+  );
+}
+
 export type ResolvedApiRequest =
   | { readonly ok: true; readonly url: URL; readonly method: ApiMethod; readonly body: string | null }
   | { readonly ok: false; readonly reason: 'invalid-request' | 'not-allowed' };
@@ -343,6 +377,9 @@ export function resolveApiRequest(request: unknown, apiBaseUrl: URL): ResolvedAp
       }
       url.searchParams.set(key, value);
     }
+  }
+  if (carriesCredential(method, path) && !validCredentialBody(method, body)) {
+    return { ok: false, reason: 'invalid-request' }; // the body is mandatory on these routes and has exactly the documented shape
   }
   let serialized: string | null = null;
   if (body !== undefined && body !== null) {

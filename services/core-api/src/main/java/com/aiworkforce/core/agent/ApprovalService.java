@@ -50,12 +50,14 @@ public class ApprovalService {
     private final AuditLog audit;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final ApproverNames approverNames;
 
     public ApprovalService(ToolApprovalRepository approvals, ToolInvocationRepository invocations,
             ExecutionRepository executions, ToolDefinitionRepository toolDefinitions, ToolGrantRepository grants,
             AgentRepository agents, TenantAccessService access, ApprovalLifecycle lifecycle, SensitivePayloadVault vault,
             AuditLog audit,
-            ApplicationEventPublisher events, Clock clock) {
+            ApplicationEventPublisher events, Clock clock, ApproverNames approverNames) {
+        this.approverNames = approverNames;
         this.approvals = approvals;
         this.invocations = invocations;
         this.executions = executions;
@@ -105,8 +107,9 @@ public class ApprovalService {
         }
         Map<String, String> toolNames = toolDefinitions.findAllById(list.stream().map(ToolApproval::getToolCode).distinct().toList())
                 .stream().collect(Collectors.toMap(ToolDefinition::getCode, ToolDefinition::getName));
+        Map<UUID, String> deciders = approverNames.resolve(organizationId, list.stream().map(ToolApproval::getDecidedBy).toList());
         return list.stream().map(a -> ApprovalView.of(a, agentNames.get(a.getAgentId()), toolNames.get(a.getToolCode()),
-                executionStatus.get(a.getExecutionId()), invocationStatus.get(a.getInvocationId()))).toList();
+                executionStatus.get(a.getExecutionId()), invocationStatus.get(a.getInvocationId()), deciders.get(a.getDecidedBy()))).toList();
     }
 
     @Transactional

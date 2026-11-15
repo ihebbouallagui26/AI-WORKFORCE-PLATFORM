@@ -165,3 +165,11 @@ It never retries a provider call, a tool call or a platform action by itself, an
 The orchestrator was already concurrent per execution (one asyncio task, one `RunContext`, one graph per execution; credentials resolved per execution). C3.4 adds no workflow state to it: the Core API decides
 which workers start, when and how many (queue, capacity, budget); the orchestrator runs the turns it is given, respects `deadlineSeconds`, forwards up to `maxDelegationsPerTurn` coordinator delegations and reports consumed
 usage on failure. An orchestrator restart loses its in-flight tasks; the Core API's reaper and scheduler recover them from PostgreSQL (C1/C3.3 semantics, at-least-once, idempotent).
+
+## 13. Security hardening (Phase C3.6)
+
+* **State sealing (format 2):** checkpoints are sealed with an HKDF-derived key and an AAD that binds organization, execution, thread and the paused tool invocation; format 1 remains readable behind `AIO_STATE_ACCEPT_LEGACY_FORMAT`. See `STATE_ENCRYPTION.md`.
+* **Bounded MCP transport:** the stdio transport (`app/mcp/bounded_stdio.py`) enforces per-message, per-call and flood limits for stdout and stderr; a failure after input was written is reported as an unknown outcome and is never replayed. It reuses private helpers of `mcp==2.3.0` (exact pin, compatibility test).
+* **Redaction:** `redact` / `redact_text` are linear, bounded and apply to logs and displayed state only.
+* **Transport:** in production the orchestrator refuses non-HTTPS Core API / identity provider URLs; TLS verification uses the client defaults (`SSL_CERT_FILE` for an internal CA), clients never follow redirects, no plaintext fallback. Real-handshake tests: `tests/test_internal_tls.py`. No mTLS.
+* The orchestrator still holds no business state and no provider credential beyond one execution's lifetime.

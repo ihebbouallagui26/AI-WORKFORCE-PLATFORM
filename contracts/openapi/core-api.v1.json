@@ -7840,6 +7840,10 @@
             "type" : "string",
             "format" : "uuid"
           },
+          "decidedByName" : {
+            "type" : "string",
+            "description" : "Display name of the member who decided, or a neutral fallback; null while undecided"
+          },
           "decidedAt" : {
             "type" : "string",
             "format" : "date-time"
@@ -9442,6 +9446,10 @@
           "decidedBy" : {
             "type" : "string",
             "format" : "uuid"
+          },
+          "decidedByName" : {
+            "type" : "string",
+            "description" : "Display name of the member who decided, or a neutral fallback; null while undecided"
           },
           "decidedAt" : {
             "type" : "string",

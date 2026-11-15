@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Tools are offered to the model only when BOTH a state encryption key is configured (a run that
     # pauses for a human approval is persisted sealed) and at least one allowlisted MCP server is enabled.
     state_encryption_key: SecretStr | None = None
+    # Security fix 8.3: sealed pauses written by the previous format (raw key, AAD organization:execution) are still READ so runs paused
+    # at the upgrade are not lost. Set to false once no pre-upgrade pause can remain (an approval expires after 15 minutes by default).
+    state_accept_legacy_format: bool = True
     tool_max_rounds: int = Field(default=6, ge=1, le=20)
     tool_max_calls_per_run: int = Field(default=8, ge=1, le=10)  # the Core API caps an execution at 10
     tool_output_max_chars: int = Field(default=8000, ge=256, le=65_536)
@@ -82,6 +85,15 @@ class Settings(BaseSettings):
 
     # --- MCP --------------------------------------------------------------------------------------
     mcp_timeout_seconds: float = Field(default=15.0, gt=0, le=300)
+    # Memory limits of an MCP server's output (security fix 8.4; see app/mcp/bounded_stdio.py for the defaults' justification).
+    # One stdout line = one JSON-RPC message: a longer one terminates the server. stderr: only the head is kept; a flood terminates it.
+    mcp_max_message_bytes: int = Field(default=1_048_576, ge=65_536, le=16_777_216)
+    mcp_stderr_capture_bytes: int = Field(default=16_384, ge=1_024, le=1_048_576)
+    mcp_stderr_flood_bytes: int = Field(default=8_388_608, ge=65_536, le=268_435_456)  # per 10-second window
+    # Aggregate bounds on stdout (a stream of individually valid messages): bytes and messages per 10-second window, bytes per tool call.
+    mcp_stdout_flood_bytes: int = Field(default=16_777_216, ge=262_144, le=1_073_741_824)
+    mcp_stdout_flood_messages: int = Field(default=50_000, ge=100, le=10_000_000)
+    mcp_max_call_bytes: int = Field(default=4_194_304, ge=65_536, le=268_435_456)
 
     @field_validator("allowed_caller_client_ids", "execution_enabled_providers", "mcp_servers", mode="before")
     @classmethod

@@ -146,3 +146,10 @@ computed from the loaded runs, the workflow definitions (search and mode filter)
   forcing); permissions in the UI only decide what is offered; no credential, token or internal identifier is shown or sent.
 * **Tests**: the Angular models are checked against REAL Core API responses captured by `WorkflowContractCaptureIntegrationTest`
   (`ui/src/testing/real-api-c3.ts`); regenerate by running that test and copying `target/workflow-contract-capture.json`.
+
+## Security hardening (Sprint C3.6)
+
+* **Provider credentials:** the main process validates the exact shape of the two credential-bearing requests (known fields only, mandatory body, credential pattern `^[!-~]{8,512}$`, bounded names) before the request leaves the app; a refusal never echoes the value. The desktop never stores provider keys; the renderer holds a typed key only briefly (the field and form control are wiped on submit, blur, page hide and dialog close). Residual: renderer memory and clipboard history cannot be zeroed by the application.
+* **Approvals:** the approvals tab shows who decided (`decided … by <name>`), never an identifier; arguments are shown redacted.
+* **Transport:** HTTP to the issuer or API is accepted only for loopback in development; any other host must be HTTPS.
+* Tests: `npm run electron:test` (49), `npm run ui:test` (295), `npm run ui:build`, `npm run electron:build`. Linux, macOS and packaged-installer runs are NOT VERIFIED.

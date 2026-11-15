@@ -293,11 +293,17 @@ export class WorkflowRunPage {
 
   constructor() {
     effect(() => {
+      // All three are read in the TRACKED part: at a cold start (reload, direct URL) the organization and its permissions arrive
+      // asynchronously, and the effect must run again when they do. Only the side effects below are untracked.
       const id = this.runId();
+      const organizationId = this.store.organizationId();
+      const allowed = this.store.can('workflow.read');
       untracked(() => {
         this.selectedRank.set(null);
-        if (this.store.can('workflow.read')) {
+        if (organizationId && allowed) {
           this.monitor.start(id);
+        } else {
+          this.monitor.release(); // no organization yet, or no workflow.read: nothing is followed and nothing of another run stays shown
         }
       });
     });

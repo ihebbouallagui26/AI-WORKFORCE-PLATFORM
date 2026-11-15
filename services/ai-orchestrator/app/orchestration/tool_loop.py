@@ -13,6 +13,7 @@ A tool call is executed at most once: nothing here retries a call whose outcome 
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -280,6 +281,30 @@ async def _handle_use(
     return await _execute(deps, invocation_id, use)
 
 
+# Bounded attempts to tell the Core API that a call's outcome is unknown (it may be briefly unreachable). Reporting is idempotent: a
+# repeated report after one that did arrive gets a 409, which means "already decided".
+UNKNOWN_REPORT_ATTEMPTS = 4
+UNKNOWN_REPORT_PAUSE_SECONDS = 1.0
+
+
+async def _report_unknown_outcome(deps: LoopDeps, invocation_id: UUID, exc: ToolExecutionError) -> None:
+    for attempt in range(UNKNOWN_REPORT_ATTEMPTS):
+        try:
+            await deps.core.complete_tool_call(
+                deps.organization_id, deps.execution_id, invocation_id, success=False, output="", truncated=False,
+                error_code="OUTCOME_UNKNOWN", message=exc.message,
+            )
+            return
+        except (CoreApiConflict, CoreApiForbidden, CoreApiNotFound):
+            return  # the Core API already decided (call closed, execution ended): it stays the source of truth for the outcome
+        except CoreApiUnavailable:
+            if attempt == UNKNOWN_REPORT_ATTEMPTS - 1:
+                # Nothing is lost: the call stays RUNNING in the Core API's own database and its recovery closes it as OUTCOME_UNKNOWN
+                # when the execution ends. The caller fails the execution (CORE_API_UNAVAILABLE) and the tool is NOT executed again.
+                raise
+            await asyncio.sleep(UNKNOWN_REPORT_PAUSE_SECONDS * (attempt + 1))
+
+
 async def _execute(deps: LoopDeps, invocation_id: UUID, use: ToolUseBlock) -> ToolResultBlock:
     try:
         start = await deps.core.begin_tool_call(deps.organization_id, deps.execution_id, invocation_id)
@@ -291,6 +316,12 @@ async def _execute(deps: LoopDeps, invocation_id: UUID, use: ToolUseBlock) -> To
             timeout_seconds=float(start.timeout_seconds), max_output_bytes=start.max_output_bytes,
         )
     except ToolExecutionError as exc:
+        if exc.outcome_unknown:
+            # The request may have reached the tool server and no trustworthy result came back (timeout, lost connection, crash, output
+            # limit): the action may have taken effect. Tell the Core API truthfully (it keeps it as an unknown outcome, never retried),
+            # then END the execution: the model is not given the chance to repeat a possibly completed action.
+            await _report_unknown_outcome(deps, invocation_id, exc)
+            raise LoopFailure("TOOL_FAILED") from exc
         await deps.core.complete_tool_call(
             deps.organization_id, deps.execution_id, invocation_id, success=False, output="", truncated=False,
             error_code=exc.error_code, message=exc.message,

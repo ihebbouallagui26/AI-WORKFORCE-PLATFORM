@@ -1,6 +1,7 @@
 /**
  * REAL responses of the Core API (Sprint C2.5 full-stack run: Keycloak login, Core API, PostgreSQL, orchestrator container,
- * production MCP manager, deterministic provider). Captured, not written by hand: they are the reference the Angular models and
+ * production MCP manager, deterministic provider). Captured, not written by hand (EXCEPTION: since Sprint C3.6 / fix 8.5 every
+ * approval and approval summary also carries `decidedByName`, added to these captures by hand because the contract gained that field): they are the reference the Angular models and
  * the execution UI are checked against. They hold synthetic test data only (no credential, no token).
  */
 export const REAL_API: Readonly<Record<string, unknown>> = {
@@ -138,6 +139,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
           "requestedAt": "2026-11-14T21:08:24.689695Z",
           "expiresAt": "2026-11-14T21:23:24.689695Z",
           "decidedBy": "01a1dbe3-cc39-7b60-b741-9ec0d1dc771d",
+          "decidedByName": "Organization member",
           "decidedAt": "2026-11-14T21:08:26.521850Z",
           "rejectionReason": null
         }
@@ -169,6 +171,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
     "requestedAt": "2026-11-14T21:08:24.689695Z",
     "expiresAt": "2026-11-14T21:23:24.689695Z",
     "decidedBy": null,
+    "decidedByName": null,
     "decidedAt": null,
     "rejectionReason": null,
     "invocationStatus": "AWAITING_APPROVAL"
@@ -194,6 +197,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
     "requestedAt": "2026-11-14T21:08:24.689695Z",
     "expiresAt": "2026-11-14T21:23:24.689695Z",
     "decidedBy": "01a1dbe3-cc39-7b60-b741-9ec0d1dc771d",
+    "decidedByName": "Organization member",
     "decidedAt": "2026-11-14T21:08:26.521849600Z",
     "rejectionReason": null,
     "invocationStatus": "APPROVED"
@@ -219,6 +223,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
     "requestedAt": "2026-11-14T21:08:36.044964Z",
     "expiresAt": "2026-11-14T21:23:36.044964Z",
     "decidedBy": "01a1dbe3-cc39-7b60-b741-9ec0d1dc771d",
+    "decidedByName": "Organization member",
     "decidedAt": "2026-11-14T21:08:36.748213Z",
     "rejectionReason": "Not needed",
     "invocationStatus": "REJECTED"
@@ -244,6 +249,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
     "requestedAt": "2026-11-14T19:08:55.243600Z",
     "expiresAt": "2026-11-14T20:08:55.243600Z",
     "decidedBy": null,
+    "decidedByName": null,
     "decidedAt": null,
     "rejectionReason": null,
     "invocationStatus": "EXPIRED"
@@ -269,6 +275,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
     "requestedAt": "2026-11-14T21:08:56.130144Z",
     "expiresAt": "2026-11-14T21:23:56.130144Z",
     "decidedBy": null,
+    "decidedByName": null,
     "decidedAt": null,
     "rejectionReason": null,
     "invocationStatus": "FAILED"
@@ -296,6 +303,7 @@ export const REAL_API: Readonly<Record<string, unknown>> = {
         "requestedAt": "2026-11-14T21:08:24.689695Z",
         "expiresAt": "2026-11-14T21:23:24.689695Z",
         "decidedBy": null,
+        "decidedByName": null,
         "decidedAt": null,
         "rejectionReason": null,
         "invocationStatus": "AWAITING_APPROVAL"
