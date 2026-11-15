@@ -249,6 +249,24 @@ const ALLOWED_ROUTES: ReadonlyArray<{ readonly method: ApiMethod; readonly patte
   ['GET', `${ORG}/approvals/${UUID}`],
   ['POST', `${ORG}/approvals/${UUID}/approve`],
   ['POST', `${ORG}/approvals/${UUID}/reject`],
+  // Multi-agent workflows (Sprints C3.1 to C3.4): definitions, runs, their steps, journal, actions and summary, cancelling a run and
+  // retrying ONE failed step. Never the /internal/** endpoints (the coordinator's platform actions and the scheduler are service-only).
+  ['GET', `${ORG}/workflows`],
+  ['POST', `${ORG}/workflows`],
+  ['GET', `${ORG}/workflows/${UUID}`],
+  ['PATCH', `${ORG}/workflows/${UUID}`],
+  ['PUT', `${ORG}/workflows/${UUID}/participants`],
+  ['PUT', `${ORG}/workflows/${UUID}/steps`],
+  ['POST', `${ORG}/workflows/${UUID}/archive`],
+  ['POST', `${ORG}/workflows/${UUID}/runs`],
+  ['GET', `${ORG}/workflow-runs`],
+  ['GET', `${ORG}/workflow-runs/${UUID}`],
+  ['GET', `${ORG}/workflow-runs/${UUID}/steps`],
+  ['GET', `${ORG}/workflow-runs/${UUID}/messages`],
+  ['GET', `${ORG}/workflow-runs/${UUID}/actions`],
+  ['GET', `${ORG}/workflow-runs/${UUID}/summary`],
+  ['POST', `${ORG}/workflow-runs/${UUID}/cancel`],
+  ['POST', `${ORG}/workflow-runs/${UUID}/steps/\\d{1,2}/retry`],
   ['GET', `${ORG}/agents/${UUID}/memory-config`],
   ['PUT', `${ORG}/agents/${UUID}/memory-config`],
   ['GET', `${ORG}/skills`],
@@ -286,6 +304,8 @@ const ALLOWED_QUERY: Readonly<Record<string, RegExp>> = {
   agentId: UUID_VALUE,
   // Approvals (Sprint C2).
   executionId: UUID_VALUE,
+  // Workflow runs (Sprint C3.1): the run list may be filtered by definition (and by the existing `status`).
+  definitionId: UUID_VALUE,
 };
 
 export const MAX_BODY_BYTES = 64 * 1024;

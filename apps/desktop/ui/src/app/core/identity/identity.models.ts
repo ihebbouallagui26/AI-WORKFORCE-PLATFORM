@@ -38,7 +38,10 @@ export type PermissionCode =
   | 'agent.execute'
   | 'agent.execution.read'
   | 'approval.read'
-  | 'approval.decide';
+  | 'approval.decide'
+  | 'workflow.read'
+  | 'workflow.manage'
+  | 'workflow.execute';
 
 export type BuiltInRoleCode = 'OWNER' | 'ADMIN' | 'MEMBER';
 

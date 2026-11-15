@@ -123,3 +123,26 @@ An `Agent` has an `identity` (name, department, role, responsibilities, skills) 
 - Agents do not execute tasks or reply, and approvals are not delivered to agents.
 - Voice messages, calls and attachments are shown as disabled “coming soon” controls.
 - The default Electron icon is used, and installers are unsigned.
+
+## Workflows (Sprint C3.5)
+
+The **Workflows** section (api mode, `/workflows`) manages multi-agent workflows of the Core API (Sprints C3.1 to C3.4): an overview with numbers
+computed from the loaded runs, the workflow definitions (search and mode filter), the run history (state filters) and the approvals.
+
+* **Definitions** (`workflow.manage`): create or edit (a new version; runs already started keep their snapshot), PIPELINE or COORDINATED, participants,
+  coordinator, failure policy, limits, parallel workers (1–3). A **visual pipeline builder** edits stages: steps of one stage are grouped cards that run in
+  parallel, a stage depends on the previous one (fan-in); invalid structures (parallel stage without parallel workers, unused or foreign participants,
+  too many steps…) are shown before saving. A pipeline whose stages all hold one step is saved exactly as before C3.4. The Core API validates again.
+* **Run page** (`/workflows/runs/:runId`, `workflow.read`): stages and workers left to right (fan-out / fan-in), queued vs dispatched vs running vs waiting
+  for approval vs completed/failed/cancelled/unknown outcome, token budget with reservation and overrun, why the run is waiting, per-worker detail with every
+  attempt, results kept separate per worker (agent output is plain, masked, untrusted text), coordinator actions, measured metrics and a chronological
+  timeline. It follows an OPEN run by **polling** (`RunMonitor`: about every 3 s, one cycle at a time, back-off on errors, stops on a terminal state, on
+  destroy and after 30 minutes); the timeline is rebuilt at each refresh, it is not a live stream.
+* **Actions** are requests the Core API may refuse: launch (`workflow.execute` + `agent.execute`, one idempotency key per intent), cancel (with the
+  consequences explained, an unknown outcome is never reported as cancelled), retry of ONE eligible failed step of a sequential run waiting for recovery
+  (manual recovery does not exist for parallel workers: the page says so instead of showing a button), approval decisions (the existing C2 approval card:
+  one approval authorizes one tool call).
+* **Security**: the renderer only reaches the workflow endpoints named in the Electron allowlist (`auth-policy.ts`; never `/internal/**`, no state
+  forcing); permissions in the UI only decide what is offered; no credential, token or internal identifier is shown or sent.
+* **Tests**: the Angular models are checked against REAL Core API responses captured by `WorkflowContractCaptureIntegrationTest`
+  (`ui/src/testing/real-api-c3.ts`); regenerate by running that test and copying `target/workflow-contract-capture.json`.

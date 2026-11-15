@@ -40,6 +40,12 @@ export const routes: Routes = [
             : import('./features/agents/agents.routes').then((m) => m.AGENTS_ROUTES),
       },
       {
+        path: 'workflows',
+        title: 'Workflows',
+        data: { title: 'Workflows' },
+        loadChildren: () => import('./features/workflows/workflows.routes').then((m) => m.WORKFLOWS_ROUTES),
+      },
+      {
         path: 'organization',
         title: 'Organization',
         data: { title: 'Organization' },
