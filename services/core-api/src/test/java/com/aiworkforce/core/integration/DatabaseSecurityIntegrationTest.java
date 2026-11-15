@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("9");
+            assertThat(result.targetSchemaVersion).isEqualTo("10");
         }
     }
 
@@ -643,7 +643,7 @@ class DatabaseSecurityIntegrationTest {
                         + run + "', '" + organization + "', '" + definition + "', 1, '{}', '" + user
                         + "', 'o', 'RUNNING', 1, 1000, now(), now(), now())");
             }
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("9").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("9");
@@ -675,11 +675,100 @@ class DatabaseSecurityIntegrationTest {
                     assertThat(rows.getInt(1)).isEqualTo(6);
                 }
             }
-            flyway.apply("latest").validate();
+            flyway.apply("9").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
                 statement.execute("SELECT count(*) FROM workflow_steps WHERE next_attempt_at IS NOT NULL");
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_steps ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A C3.3 database (V1..V9 with a pipeline definition and a run) upgrades to V10: existing definitions and runs stay sequential
+     * (one parallel worker), queued work becomes representable (a step without child execution, only while QUEUED or CANCELLED), the
+     * live-rank index also covers QUEUED, a coordinator turn may accept several delegations but only one finish, and the runtime role
+     * keeps DML without DDL.
+     */
+    @Test
+    void upgradesAnExistingC33DatabaseAndAddsParallelExecution() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("9").migrate();
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID definition = UUID.randomUUID();
+            UUID run = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'c33@example.test', true, 'C33', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing C33 organization', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, created_by, created_at, updated_at) VALUES ('"
+                        + definition + "', '" + organization + "', 'pipeline', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_runs (id, organization_id, definition_id, definition_version, snapshot, requested_by, "
+                        + "objective, status, total_steps, token_budget, deadline_at, created_at, updated_at) VALUES ('"
+                        + run + "', '" + organization + "', '" + definition + "', 1, '{}', '" + user
+                        + "', 'o', 'RUNNING', 1, 1000, now(), now(), now())");
+            }
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("10");
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT (SELECT count(*) FROM workflow_definitions WHERE "
+                        + "max_parallel_workers = 1), (SELECT count(*) FROM workflow_runs WHERE max_parallel_workers = 1 AND reserved_tokens = 0)")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(1);
+                    assertThat(rows.getInt(2)).isEqualTo(1);
+                }
+                // The parallel bound is 1..3 and never combines with manual recovery; reservations are never negative.
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_definitions SET max_parallel_workers = 4"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_definitions SET max_parallel_workers = 2, recovery_mode = 'MANUAL'"))
+                        .isInstanceOf(java.sql.SQLException.class);
+                assertThatThrownBy(() -> statement.execute("UPDATE workflow_runs SET reserved_tokens = -1")).isInstanceOf(java.sql.SQLException.class);
+                // Queued work: a step may lack its child execution only while QUEUED or CANCELLED; the live-rank index covers QUEUED.
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT is_nullable FROM information_schema.columns WHERE table_name = "
+                        + "'workflow_steps' AND column_name = 'execution_id'")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).isEqualTo("YES");
+                }
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'ck_workflow_steps_execution'")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).contains("QUEUED").contains("CANCELLED").contains("execution_id IS NOT NULL");
+                }
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_workflow_steps_live_rank'")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).contains("QUEUED").contains("UNIQUE");
+                }
+                // Several delegations per turn, a single finish per turn.
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT count(*) FROM pg_indexes WHERE indexname = 'uq_workflow_actions_one_per_turn'")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isZero();
+                }
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_workflow_actions_one_finish_per_turn'")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).contains("workflow.finish").contains("UNIQUE");
+                }
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM workflow_steps WHERE status = 'QUEUED'");
                 assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_steps ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
             }
         }

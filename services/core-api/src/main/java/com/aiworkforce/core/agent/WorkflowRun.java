@@ -105,6 +105,13 @@ public class WorkflowRun {
     @Column(name = "manual_retries", nullable = false)
     private int manualRetries;
 
+    @Column(name = "max_parallel_workers", nullable = false, updatable = false)
+    private int maxParallelWorkers = 1;
+
+    /** Tokens set aside for the workers that are running now; replaced by their actual usage when they end. */
+    @Column(name = "reserved_tokens", nullable = false)
+    private int reservedTokens;
+
     @Version
     @Column(name = "row_version")
     private long rowVersion;
@@ -121,6 +128,7 @@ public class WorkflowRun {
         this.snapshot = snapshot;
         this.mode = definition.getMode();
         this.failurePolicy = definition.getFailurePolicy();
+        this.maxParallelWorkers = definition.getMaxParallelWorkers();
         this.requestedBy = requestedBy;
         this.requestId = requestId;
         this.objective = objective;
@@ -205,12 +213,20 @@ public class WorkflowRun {
         result = lastResult;
     }
 
+    void reserve(int tokens) {
+        reservedTokens += Math.max(0, tokens);
+    }
+
+    void release(int tokens) {
+        reservedTokens = Math.max(0, reservedTokens - Math.max(0, tokens));
+    }
+
     void addTokens(int tokens) {
         tokensUsed += Math.max(0, tokens);
     }
 
     void scheduled(int rank) {
-        nextRank = rank + 1;
+        nextRank = Math.max(nextRank, rank + 1);
     }
 
     int nextMessageSequence() {
@@ -230,6 +246,8 @@ public class WorkflowRun {
     public int getTotalSteps() { return totalSteps; }
     public WorkflowFailurePolicy getFailurePolicy() { return failurePolicy; }
     public int getManualRetries() { return manualRetries; }
+    public int getMaxParallelWorkers() { return maxParallelWorkers; }
+    public int getReservedTokens() { return reservedTokens; }
     public int getNextRank() { return nextRank; }
     public int getTokensUsed() { return tokensUsed; }
     public int getTokenBudget() { return tokenBudget; }

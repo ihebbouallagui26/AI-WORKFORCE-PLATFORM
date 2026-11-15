@@ -119,9 +119,15 @@ class ExecutionCoordinator {
 
     @Transactional
     public ExecutionView fail(UUID organizationId, UUID executionId, String code, String message) {
+        return fail(organizationId, executionId, code, message, null, null);
+    }
+
+    /** Failure reported by the orchestrator, with the provider usage already consumed (if any): it counts toward a workflow's budget. */
+    @Transactional
+    public ExecutionView fail(UUID organizationId, UUID executionId, String code, String message, Integer inputTokens, Integer outputTokens) {
         AgentExecution execution = lock(organizationId, executionId);
         String safeCode = code != null && CODE.matcher(code).matches() ? code : "EXECUTION_FAILED";
-        execution.fail(safeCode, safeMessage(message), Instant.now(clock));
+        execution.fail(safeCode, safeMessage(message), nonNegative(inputTokens), nonNegative(outputTokens), Instant.now(clock));
         audit.record(organizationId, null, "agent.execution.failed", "agent", execution.getAgentId(),
                 AgentSupport.details("executionId", executionId, "errorCode", safeCode));
         return ExecutionView.of(execution);

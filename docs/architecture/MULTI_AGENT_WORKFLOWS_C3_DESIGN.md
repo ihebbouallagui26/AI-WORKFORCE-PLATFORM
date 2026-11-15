@@ -285,3 +285,75 @@ coûts monétaires** (aucune donnée de prix fiable) ; la corrélation passe par
 * `TOOL_FAILURE` n'est jamais rejouable : il faudrait un contrat d'idempotence par outil, absent du registre.
 * Les tests de redémarrage utilisent un **nouveau worker sans mémoire** sur PostgreSQL réel (pas un conteneur recréé en cours de run).
 * Pas d'exactly-once pour les effets externes : au mieux « au plus une fois » pour un appel d'outil, « au moins une fois » pour la livraison des événements.
+
+## 13. Réalité de C3.4 (implémenté, vérifié) — exécution parallèle contrôlée
+
+Principe : **le Core API possède l'état du workflow et les décisions de concurrence ; l'orchestrateur exécute des tours d'agents isolés ; PostgreSQL garantit
+l'ordonnancement durable ; C3.3 garantit la reprise sûre.** Le défaut reste **séquentiel** (`maxParallelWorkers` = 1) : aucun workflow existant ne change.
+
+### Ce que le modèle existant représentait déjà (non dupliqué)
+Un worker = une ligne `workflow_steps` (le C3.1 autorisait déjà plusieurs rangs vivants : l'index d'unicité est par rang) ; une délégation = une ligne `workflow_actions`
+reliée à son étape ; retries, catégories d'échec, échéances = colonnes C3.3. **Aucune table n'a été ajoutée.**
+
+### V10 (additive ; V1–V9 intacts) et pourquoi
+| Changement | Raison |
+|---|---|
+| `workflow_steps.execution_id` nullable + statut `QUEUED` (contrainte : sans exécution seulement `QUEUED`/`CANCELLED`) | un travail accepté doit être **persisté avant** d'être dispatché et survivre à un redémarrage quand aucune capacité n'est libre ; la même ligne porte ensuite la tentative |
+| `workflow_steps.group_no`, `reserved_tokens` | quel groupe (étape de pipeline ou tour du coordinateur) ; réservation de jetons par worker |
+| `workflow_runs.max_parallel_workers`, `reserved_tokens` ; `workflow_definitions.max_parallel_workers` (1..3, défaut 1) | borne de concurrence figée dans le snapshot ; réservation atomique (run verrouillé) |
+| index `uq_workflow_steps_live_rank` étendu à `QUEUED` | un rang ne peut être ni mis en file ni lancé deux fois |
+| `uq_workflow_actions_one_per_turn` remplacé par `uq_workflow_actions_one_finish_per_turn` | plusieurs délégations acceptées dans un tour ; un seul `finish` |
+| contrainte : `max_parallel_workers > 1` incompatible avec `recovery_mode = MANUAL` | la reprise manuelle suppose UNE étape échouée qui arrête le run |
+
+### Modèle d'exécution
+`WorkflowScheduler.advanceParallel` (une passe idempotente, run verrouillé, tout depuis PostgreSQL) : (1) fins imposées à tous les enfants (échéance globale, annulation, délai
+d'étape) → (2) règlement des enfants terminés → (3) échec que la politique ne permet pas de continuer : annulation des pairs en file, arrêt des pairs actifs (délai de grâce 30 s
+pour un appel d'outil en vol, puis `OUTCOME_UNKNOWN`, jamais « annulé ») → (4) **dispatch** des travaux en file et des retries dus dans les bornes → (5) **fan-in** seulement quand
+**chaque rang du groupe** est résolu (ni en file, ni vivant, ni retry en attente) → étape suivante / tour coordinateur suivant.
+
+* **Pipeline** : `stage` optionnel sur chaque étape (tout ou rien) ; mêmes stages = parallèles ; stages contigus à partir de 1 ; taille d'un stage ≤ `maxParallelWorkers` ; une
+  dépendance (`inputsFrom`) doit viser un stage **strictement antérieur** (pas de cycle) ; par défaut une étape reçoit **toutes** les étapes du stage précédent (fan-in), dans l'ordre des
+  rangs. Sans `stage`, le pipeline est exactement celui de C3.1. Le résultat final d'un dernier stage multi-étapes est la concaténation ordonnée des résultats.
+* **Coordinateur** : `workflow.delegate` appelé plusieurs fois dans **un** tour (jusqu'à `maxParallelWorkers`, annoncé dans la réponse `start` : `maxDelegationsPerTurn`) ; chaque
+  appel garde son idempotence `(exécution, tool_call_id)` ; `finish` n'est jamais combiné avec des délégations ; les délégations acceptées comptent déjà contre `maxSteps` ;
+  `GROUP_FULL` au-delà de la borne. Les délégations acceptées sont **persistées ensemble** (une transaction) puis dispatchées indépendamment ; le coordinateur reprend seulement
+  quand le groupe est résolu et reçoit **tous** les résultats et échecs (bornés, comme données non fiables). Pas de délégation récursive, pas de worker→worker.
+* **Atomicité** : la création des lignes `QUEUED` d'un groupe est atomique (tout ou rien). Le dispatch est **par worker** : un worker qui ne peut pas démarrer (capacité C1, budget)
+  reste `QUEUED` et sera dispatché par une passe ultérieure — jamais de groupe à moitié « accepté » sans trace persistée ; un agent devenu inutilisable met fin proprement au groupe
+  (`STEP_NOT_RUNNABLE`, pairs arrêtés).
+
+### Concurrence, capacité, équité
+Borne par workflow : `min(maxParallelWorkers, app.workflows.max-parallel-workers=3)`. Capacité organisation : **inchangée**, 3 exécutions ouvertes (C1) : un travail sans slot reste `QUEUED`.
+Politique : une exécution `WAITING_APPROVAL` **garde son slot** (elle est « ouverte » en C1) ; un tour coordinateur terminé libère le sien avant le dispatch du groupe. Un seul groupe à la fois
+par workflow. Équité : la maintenance traite les runs par `updatedAt` croissant (un run qui vient d'avancer passe derrière), par lots de 50 ; un grand workflow ne peut pas monopoliser les slots
+indéfiniment (ses workers se terminent et libèrent). Pas de limite par fournisseur (non implémentée). Les passes concurrentes se sérialisent sur le verrou de ligne du run (pas de `SKIP LOCKED` :
+une seconde instance attend brièvement au lieu de sauter).
+
+### Budget de jetons (réservation atomique)
+Au dispatch, un worker réserve `min(app.workflows.worker-token-reservation=4000, reste)` (jamais moins de 500) sur `tokens_used + reserved_tokens ≤ budget` — sous le verrou du run, donc sans
+course entre workers. À la fin de l'enfant, la réservation est **remplacée** par l'usage réel (une seule fois). Aucune capacité disponible : le travail reste en file ; plus rien ne tourne et plus de
+budget → `TOKEN_BUDGET_EXCEEDED`, file annulée. Limite : l'usage réel peut dépasser la réservation (non connue d'avance) ; le dépassement est borné par la réservation de l'étape suivante. Les tentatives
+**échouées** comptent aussi : `fail` transporte maintenant l'usage déjà consommé (correction C3.3, voir le rapport).
+
+### Politiques d'échec dans un groupe
+`FAIL_FAST`/`RETRY` : un échec définitif annule les pairs en file et arrête les pairs actifs (sauf appel d'outil en vol : grâce puis `OUTCOME_UNKNOWN`), conserve les résultats terminés, n'ouvre pas la suite, et
+le run n'est `FAILED` que quand tous les pairs sont résolus. `CONTINUE` : les pairs continuent, l'échec est conservé à part et rapporté (`FAILED (<catégorie>, nothing external happened | an external effect may have
+happened)`), mais **jamais** au-delà d'une limite ou d'une autorisation révoquée (le délai d'étape en est une : les pairs sont arrêtés). `RETRY` : éligibilité C3.3 inchangée ; **seul** le worker échoué est relancé (nouvelle
+exécution, backoff durable), ses pairs ne sont pas touchés ; `OUTCOME_UNKNOWN` n'est jamais rejoué. La reprise manuelle (`WAITING_RECOVERY`) n'existe pas avec le parallélisme (limite assumée).
+
+### Approbations C2
+Inchangées : chaque worker garde sa politique d'outils ; chaque approbation référence **son** invocation/exécution (jamais d'objet partagé) ; approuver l'une n'approuve pas l'autre ; un rejet suit la politique d'échec ;
+l'expiration et la clôture des approbations obsolètes restent celles de C2. Le run reste `RUNNING` tant qu'un worker travaille et n'est `WAITING_APPROVAL` que lorsque tous les workers vivants attendent une personne.
+
+### Ordonnancement durable et reprise
+Tout l'état (travaux en file, réservations, échéances de retry, groupe) est en PostgreSQL ; une passe d'un worker sans mémoire reconstruit le groupe, ne relance pas un worker terminé, dispatche le travail en file et ne
+crée aucun doublon (index d'unicité par rang). Un run terminal ne crée rien. Livraison : au moins une fois, traitement idempotent ; **pas d'exactly-once** pour les effets externes.
+
+### Orchestrateur Python
+`ExecutionRunner` exécutait déjà chaque exécution dans sa propre tâche asyncio, avec un `RunContext` et un graphe par exécution : aucun état mutable partagé. Ajouts : `deadlineSeconds` (C3.3), `maxDelegationsPerTurn`
+(plusieurs appels `workflow_delegate` transmis individuellement, bornés), usage consommé transmis sur `fail`. Capacité par défaut de l'orchestrateur : 4 exécutions simultanées (`AIO_MAX_CONCURRENT_EXECUTIONS`) — au-delà,
+503 → `ORCHESTRATOR_UNAVAILABLE` (transitoire, rejoué si sûr).
+
+### Limites
+Séquence uniquement entre groupes (un groupe à la fois) ; pas de limite par fournisseur ; pas de reprise manuelle en parallèle ; réservation conservatrice et configurable ; pas de `SKIP LOCKED` ; validation sur conteneurs
+recréés non rejouée (voir le rapport) ; connectivité Anthropic réelle NON VÉRIFIÉE.

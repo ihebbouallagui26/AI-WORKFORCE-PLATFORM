@@ -313,3 +313,19 @@ Failure handling for both modes; the Core API owns every decision (design: `docs
   budget, next scheduled retry. Tokens are not money.
 - Internal `start` answers carry `deadlineSeconds` for executions that belong to a workflow.
 - Limits: no reconciliation of unknown outcomes, no exactly-once guarantee for external effects, tool failures are never replayed.
+
+## Controlled parallel execution (Sprint C3.4)
+
+Independent workers may run at the same time, in both modes; the default stays sequential (`maxParallelWorkers` = 1). Design: `docs/architecture/MULTI_AGENT_WORKFLOWS_C3_DESIGN.md` §13.
+
+- `V10__workflow_parallel_execution.sql` (additive): `QUEUED` steps (accepted work persisted before dispatch, `execution_id` nullable only while queued or cancelled), `group_no`, token
+  reservations, `max_parallel_workers` (1..3) on definitions and runs, several accepted delegations per coordinator turn (one finish).
+- Definitions: `maxParallelWorkers` (1–3, never combined with manual recovery); pipeline steps take an optional `stage` (all or none; same stage = parallel; contiguous; stage size ≤ the bound;
+  dependencies only on earlier stages; default input = every step of the previous stage). Coordinated workflows: `workflow.delegate` up to the bound per turn (`maxDelegationsPerTurn` in the internal `start` answer).
+- Scheduling: a group is persisted as `QUEUED` steps, dispatched within `min(maxParallelWorkers, app.workflows.max-parallel-workers)`, the C1 organization capacity (3 open executions) and the token budget
+  (reservation `app.workflows.worker-token-reservation`, replaced by actual usage); fan-in only when every rank of the group is resolved. Policies of C3.3 apply per group (FAIL_FAST stops siblings; CONTINUE keeps
+  failures apart and never goes past a limit; RETRY replaces only the failed worker).
+- Observability: `GET …/workflow-runs/{runId}/summary` now has `groups` (status, workers, queued, running, waiting for approval, succeeded, failed), `peakConcurrency`, `reservedTokens`, per-attempt `queueWaitMs`;
+  steps expose `groupNo` and `QUEUED`.
+- Failed executions now report the provider usage already consumed (`inputTokens`/`outputTokens` on the internal `fail`): it counts toward the workflow budget.
+- Not guaranteed: exactly-once external effects; no manual recovery in parallel workflows; no per-provider concurrency limit.

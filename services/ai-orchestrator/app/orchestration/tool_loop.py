@@ -117,6 +117,8 @@ class LoopDeps:
     output_max_chars: int
     # C3.2: a coordinator turn offers ONLY these platform actions (alias -> action) and never an MCP tool.
     platform: dict[str, PlatformAction] = field(default_factory=dict)
+    # C3.4: how many delegations one coordinator turn may make (the Core API enforces it too).
+    max_delegations: int = 1
 
     @property
     def coordinator(self) -> bool:
@@ -166,15 +168,13 @@ async def run_loop(deps: LoopDeps, state: LoopState, resume: ResumeInfo | None =
             state.pending = PendingTools(uses=uses, reason=turn.text[:500])
 
         pending = state.pending
+        if deps.coordinator:
+            done = await _coordinator_turn(deps, pending)
+            if done is not None:
+                return done
+            pending.index = len(pending.uses)  # every call was answered with an error block: the model may choose again
         while pending.index < len(pending.uses):
             use = pending.uses[pending.index]
-            if deps.coordinator:
-                taken = await _handle_platform_action(deps, pending, use)
-                if isinstance(taken, ActionTaken):
-                    return Completed(text=taken.message)
-                pending.results.append(taken)
-                pending.index += 1
-                continue
             handled = await _handle_use(deps, state, pending, use, resume)
             resume = None  # a decision is consumed by the call it belongs to
             if isinstance(handled, Paused):
@@ -187,18 +187,41 @@ async def run_loop(deps: LoopDeps, state: LoopState, resume: ResumeInfo | None =
         state.pending = None
 
 
-async def _handle_platform_action(
-    deps: LoopDeps, pending: PendingTools, use: ToolUseBlock
-) -> ToolResultBlock | ActionTaken:
+FINISH_ACTION = "workflow.finish"
+
+
+async def _coordinator_turn(deps: LoopDeps, pending: PendingTools) -> Completed | None:
+    """Handles ALL the calls of one coordinator response: up to ``max_delegations`` delegations (independent tasks that will run in
+    parallel), or one finish, never both. Returns the end of the turn once the Core API accepted something, else None (every call
+    got an error block and the model may choose again)."""
+    delegations = 0
+    for use in pending.uses:
+        taken = await _handle_platform_action(deps, use, delegations)
+        if isinstance(taken, ActionTaken):
+            if taken.action == FINISH_ACTION:
+                return Completed(text=taken.message)
+            delegations += 1
+            continue
+        pending.results.append(taken)
+    if delegations:
+        return Completed(text="workflow.delegate accepted." if delegations == 1 else f"{delegations} workflow.delegate actions accepted.")
+    return None
+
+
+async def _handle_platform_action(deps: LoopDeps, use: ToolUseBlock, delegations: int) -> ToolResultBlock | ActionTaken:
     """Forwards ONE coordinator action to the Core API and reports its decision back to the model.
 
-    The orchestrator interprets nothing: it checks the name and the argument shape, forwards, and relays the answer.
-    Only the first action of a turn is forwarded; any other in the same turn is refused here without a request."""
+    The orchestrator interprets nothing: it checks the name and the argument shape, forwards, and relays the answer. What it refuses
+    locally (without a request) is only what can never be valid: an unknown action, too many delegations, a finish after a delegation."""
     action = deps.platform.get(use.name)
     if action is None:
         return _error_block(use, "Unknown action. Only the provided workflow actions exist.")  # never reaches a tool
-    if pending.index > 0:
-        return _error_block(use, "Only one action per turn is allowed.")
+    if action.name == FINISH_ACTION and delegations > 0:
+        return _error_block(use, "A finish cannot be combined with delegations in the same turn.")
+    if action.name != FINISH_ACTION and delegations >= deps.max_delegations:
+        if deps.max_delegations == 1:
+            return _error_block(use, "Only one action per turn is allowed.")
+        return _error_block(use, f"At most {deps.max_delegations} delegations per turn.")
     problem = validate_arguments(action.input_schema, use.input)
     if problem is not None:
         return _error_block(use, problem)

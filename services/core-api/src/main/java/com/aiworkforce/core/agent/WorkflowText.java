@@ -74,7 +74,8 @@ final class WorkflowText {
      * Workers are described by opaque workflow-scoped references only; worker results are framed as untrusted data.
      */
     static String composeCoordinatorTask(String objective, List<WorkflowSpec.Member> members, List<String> results, int turn,
-            int maxTurns, int workerSteps, int maxWorkerSteps, long remainingTokens, long remainingSeconds, boolean corrective) {
+            int maxTurns, int workerSteps, int maxWorkerSteps, long remainingTokens, long remainingSeconds, boolean corrective,
+            int maxParallel) {
         StringBuilder out = new StringBuilder();
         out.append("You are the COORDINATOR of a supervised multi-agent workflow (decision turn ").append(turn).append(" of at most ")
                 .append(maxTurns).append(").\n\nWorkflow objective:\n").append(bounded(objective, 2000)).append("\n\n");
@@ -91,10 +92,14 @@ final class WorkflowText {
                 out.append("\n");
             }
         }
-        out.append("\nRules: you must call EXACTLY ONE of the two actions this turn: workflow.delegate (give one worker one task) or "
+        out.append("\nRules: you must use the two actions this way: workflow.delegate (give one worker one task) or "
                 + "workflow.finish (end the workflow with the final result). You cannot use any other tool, add workers, or change "
-                + "limits. Delegate sequentially: one worker at a time, never the same task twice to the same worker, never to "
-                + "yourself. Use inputRanks to pass earlier step results to a worker.\n");
+                + "limits. ")
+                .append(maxParallel > 1
+                        ? "You may call workflow.delegate up to " + maxParallel + " times in this turn for INDEPENDENT tasks: those workers run at the same "
+                                + "time and you receive all their results together. workflow.finish is never combined with delegations. "
+                        : "Call exactly one action this turn; delegate one worker at a time. ")
+                .append("Never give the same task twice to the same worker, never delegate to yourself. Use inputRanks to pass earlier step results to a worker.\n");
         out.append("Worker steps used: ").append(workerSteps).append(" of ").append(maxWorkerSteps).append(". Remaining budget: about ")
                 .append(Math.max(0, remainingTokens)).append(" tokens and ").append(Math.max(0, remainingSeconds)).append(" seconds.\n");
         StringBuilder done = new StringBuilder();

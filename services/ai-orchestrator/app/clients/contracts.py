@@ -114,6 +114,8 @@ class ExecutionStarted(WireModel):
     platform_actions: list[PlatformAction] = Field(default_factory=list)
     # C3.3: seconds left (step or workflow deadline) when the execution belongs to a workflow; None otherwise.
     deadline_seconds: int | None = Field(default=None, ge=1)
+    # C3.4: coordinator turns only: how many workflow.delegate calls the turn may make (1 = one task at a time).
+    max_delegations_per_turn: int | None = Field(default=None, ge=1, le=3)
 
 
 class ExecutionCredential(WireModel):

@@ -6137,6 +6137,13 @@
             },
             "maxItems" : 7,
             "minItems" : 0
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32",
+            "description" : "Steps with the same stage run in parallel; a later stage starts when the earlier one is resolved",
+            "maximum" : 8,
+            "minimum" : 1
           }
         },
         "required" : [ "instruction", "name" ]
@@ -6214,6 +6221,10 @@
             "type" : "integer",
             "format" : "int32"
           },
+          "maxParallelWorkers" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
           "createdBy" : {
             "type" : "string",
             "format" : "uuid"
@@ -6281,6 +6292,10 @@
               "type" : "integer",
               "format" : "int32"
             }
+          },
+          "stage" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -7247,6 +7262,13 @@
             "description" : "Per-step timeout in seconds (10 or more); 0 removes it",
             "maximum" : 86400,
             "minimum" : 0
+          },
+          "maxParallelWorkers" : {
+            "type" : "integer",
+            "format" : "int32",
+            "description" : "Concurrent workers: 1 (default, sequential) to 3. Needed for parallel stages and parallel delegation",
+            "maximum" : 3,
+            "minimum" : 1
           }
         },
         "required" : [ "name" ]
@@ -7290,6 +7312,10 @@
           "mode" : {
             "type" : "string",
             "enum" : [ "PIPELINE", "COORDINATED" ]
+          },
+          "maxParallelWorkers" : {
+            "type" : "integer",
+            "format" : "int32"
           },
           "status" : {
             "type" : "string",
@@ -8237,6 +8263,11 @@
             "type" : "integer",
             "format" : "int64",
             "description" : "Seconds left (step or workflow deadline) when the execution belongs to a workflow; the orchestrator must not run past it"
+          },
+          "maxDelegationsPerTurn" : {
+            "type" : "integer",
+            "format" : "int32",
+            "description" : "Coordinator turns only: how many workflow.delegate calls this turn may make (1 = one task at a time)"
           }
         }
       },
@@ -8288,6 +8319,16 @@
             "type" : "string",
             "maxLength" : 1000,
             "minLength" : 0
+          },
+          "inputTokens" : {
+            "type" : "integer",
+            "format" : "int32",
+            "minimum" : 0
+          },
+          "outputTokens" : {
+            "type" : "integer",
+            "format" : "int32",
+            "minimum" : 0
           }
         },
         "required" : [ "errorCode" ]
@@ -8409,6 +8450,12 @@
             "format" : "int32",
             "maximum" : 86400,
             "minimum" : 0
+          },
+          "maxParallelWorkers" : {
+            "type" : "integer",
+            "format" : "int32",
+            "maximum" : 3,
+            "minimum" : 1
           }
         }
       },
@@ -8846,7 +8893,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
+            "enum" : [ "QUEUED", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
           },
           "errorCode" : {
             "type" : "string"
@@ -8873,6 +8920,66 @@
           "outputTokens" : {
             "type" : "integer",
             "format" : "int64"
+          },
+          "groupNo" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "queueWaitMs" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "WorkflowGroup" : {
+        "type" : "object",
+        "properties" : {
+          "groupNo" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "workers" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "queued" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "running" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "waitingApproval" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "succeeded" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "failed" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "cancelled" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "firstDispatchedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "finishedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "peakConcurrency" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },
@@ -8977,6 +9084,24 @@
             "items" : {
               "$ref" : "#/components/schemas/WorkflowAttemptUsage"
             }
+          },
+          "maxParallelWorkers" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "peakConcurrency" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "reservedTokens" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "groups" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowGroup"
+            }
           }
         }
       },
@@ -9045,7 +9170,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
+            "enum" : [ "QUEUED", "RUNNING", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "CANCELLED" ]
           },
           "inputsFrom" : {
             "type" : "string"
@@ -9088,6 +9213,10 @@
           "deadlineAt" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "groupNo" : {
+            "type" : "integer",
+            "format" : "int32"
           }
         }
       },

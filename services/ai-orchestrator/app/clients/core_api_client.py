@@ -205,8 +205,22 @@ class CoreApiClient:
         body = {"result": result, "inputTokens": input_tokens, "outputTokens": output_tokens, "model": model}
         await self._request("POST", self._run_path(organization_id, execution_id, "complete"), json=body)
 
-    async def fail_execution(self, organization_id: UUID, execution_id: UUID, *, error_code: str, message: str) -> None:
-        body = {"errorCode": error_code, "message": message}
+    async def fail_execution(
+        self,
+        organization_id: UUID,
+        execution_id: UUID,
+        *,
+        error_code: str,
+        message: str,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+    ) -> None:
+        # The provider usage already consumed is reported too: a failed attempt still counts toward a workflow budget.
+        body: dict[str, Any] = {"errorCode": error_code, "message": message}
+        if input_tokens is not None:
+            body["inputTokens"] = input_tokens
+        if output_tokens is not None:
+            body["outputTokens"] = output_tokens
         await self._request("POST", self._run_path(organization_id, execution_id, "fail"), json=body)
 
     # ---- tool calls (C2). State-changing, so never retried ---------------------------------------

@@ -80,6 +80,7 @@ class StubCore:
         self.tool_requests = []
         self.completed = []
         self.failed = []
+        self.failed_usage = (None, None)
         self.started = started
 
     async def submit_workflow_action(self, organization_id, execution_id, *, tool_call_id, action, arguments):
@@ -110,8 +111,9 @@ class StubCore:
     async def complete_execution(self, organization_id, execution_id, **kwargs):
         self.completed.append(kwargs)
 
-    async def fail_execution(self, organization_id, execution_id, *, error_code, message):
+    async def fail_execution(self, organization_id, execution_id, *, error_code, message, input_tokens=None, output_tokens=None):
         self.failed.append((error_code, message))
+        self.failed_usage = (input_tokens, output_tokens)
 
 
 def accepted(action="workflow.delegate"):

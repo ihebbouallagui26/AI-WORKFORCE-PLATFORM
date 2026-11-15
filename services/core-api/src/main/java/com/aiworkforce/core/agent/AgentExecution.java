@@ -161,9 +161,16 @@ public class AgentExecution {
     }
 
     void fail(String code, String safeMessage, Instant now) {
+        fail(code, safeMessage, null, null, now);
+    }
+
+    /** A failed execution may already have used the provider: the usage it reports is kept (and counted by a workflow). */
+    void fail(String code, String safeMessage, Integer inputTokens, Integer outputTokens, Instant now) {
         transition(ExecutionStatus.FAILED, now);
         errorCode = code;
         errorMessage = safeMessage;
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
         completedAt = now;
     }
 

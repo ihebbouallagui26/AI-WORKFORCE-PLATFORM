@@ -44,7 +44,8 @@ public class WorkflowController {
             @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds,
             @Schema(description = "FAIL_FAST (default), CONTINUE or RETRY (needs maxRetriesPerStep of at least 1)") WorkflowFailurePolicy failurePolicy,
             @Schema(description = "NONE (default) or MANUAL: a safe failure waits for a person to retry the step") WorkflowRecoveryMode recoveryMode,
-            @Min(0) @Max(86_400) @Schema(description = "Per-step timeout in seconds (10 or more); 0 removes it") Integer stepTimeoutSeconds) {
+            @Min(0) @Max(86_400) @Schema(description = "Per-step timeout in seconds (10 or more); 0 removes it") Integer stepTimeoutSeconds,
+            @Min(1) @Max(3) @Schema(description = "Concurrent workers: 1 (default, sequential) to 3. Needed for parallel stages and parallel delegation") Integer maxParallelWorkers) {
     }
 
     @Schema(name = "UpdateWorkflowRequest")
@@ -52,7 +53,7 @@ public class WorkflowController {
             @Min(1) @Max(8) Integer maxSteps, @Min(0) @Max(2) Integer maxRetriesPerStep,
             @Min(1000) @Max(10_000_000) Integer tokenBudget, @Min(30) @Max(86_400) Integer deadlineSeconds,
             WorkflowFailurePolicy failurePolicy, WorkflowRecoveryMode recoveryMode,
-            @Min(0) @Max(86_400) Integer stepTimeoutSeconds) {
+            @Min(0) @Max(86_400) Integer stepTimeoutSeconds, @Min(1) @Max(3) Integer maxParallelWorkers) {
     }
 
     @Schema(name = "SetWorkflowParticipantsRequest")
@@ -62,7 +63,8 @@ public class WorkflowController {
 
     @Schema(name = "WorkflowStepInput")
     public record StepRequest(@NotBlank @Size(max = 120) String name, UUID agentId, @NotBlank @Size(max = 2000) String instruction,
-            @Size(max = 7) List<Integer> inputsFrom) {
+            @Size(max = 7) List<Integer> inputsFrom,
+            @Min(1) @Max(8) @Schema(description = "Steps with the same stage run in parallel; a later stage starts when the earlier one is resolved") Integer stage) {
     }
 
     @Schema(name = "SetWorkflowStepsRequest")
@@ -81,7 +83,7 @@ public class WorkflowController {
     public DefinitionView create(@PathVariable UUID organizationId, AuthenticatedUser user, @Valid @RequestBody CreateRequest request) {
         return workflows.create(organizationId, user, request.name(), request.description(), request.maxSteps(),
                 request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.mode(), request.failurePolicy(),
-                request.recoveryMode(), request.stepTimeoutSeconds());
+                request.recoveryMode(), request.stepTimeoutSeconds(), request.maxParallelWorkers());
     }
 
     @GetMapping
@@ -105,7 +107,7 @@ public class WorkflowController {
             @Valid @RequestBody UpdateRequest request) {
         return workflows.update(organizationId, workflowId, user, request.name(), request.description(), request.maxSteps(),
                 request.maxRetriesPerStep(), request.tokenBudget(), request.deadlineSeconds(), request.failurePolicy(),
-                request.recoveryMode(), request.stepTimeoutSeconds());
+                request.recoveryMode(), request.stepTimeoutSeconds(), request.maxParallelWorkers());
     }
 
     @PutMapping(path = "/{workflowId}/participants", consumes = MediaType.APPLICATION_JSON_VALUE)
@@ -120,7 +122,7 @@ public class WorkflowController {
     public DefinitionView setSteps(@PathVariable UUID organizationId, @PathVariable UUID workflowId, AuthenticatedUser user,
             @Valid @RequestBody StepsRequest request) {
         return workflows.setSteps(organizationId, workflowId, user, request.steps() == null ? List.of() : request.steps().stream()
-                .map(s -> new WorkflowSpec.StepInput(s.name(), s.agentId(), s.instruction(), s.inputsFrom())).toList());
+                .map(s -> new WorkflowSpec.StepInput(s.name(), s.agentId(), s.instruction(), s.inputsFrom(), s.stage())).toList());
     }
 
     @PostMapping("/{workflowId}/archive")

@@ -159,3 +159,9 @@ about the workflow in its checkpoints, and a coordinator turn never pauses for a
 Retry, backoff, failure policies and manual recovery live entirely in the Core API (`WorkflowScheduler`, PostgreSQL). The orchestrator contributes two things: precise,
 safe failure codes (including `DEADLINE_EXCEEDED`) and respect for the `deadlineSeconds` the Core API returns at `start` (`asyncio.timeout` around the model/tool run).
 It never retries a provider call, a tool call or a platform action by itself, and no workflow, attempt or retry state is placed in checkpoints.
+
+## 12. Parallel execution (Phase C3.4)
+
+The orchestrator was already concurrent per execution (one asyncio task, one `RunContext`, one graph per execution; credentials resolved per execution). C3.4 adds no workflow state to it: the Core API decides
+which workers start, when and how many (queue, capacity, budget); the orchestrator runs the turns it is given, respects `deadlineSeconds`, forwards up to `maxDelegationsPerTurn` coordinator delegations and reports consumed
+usage on failure. An orchestrator restart loses its in-flight tasks; the Core API's reaper and scheduler recover them from PostgreSQL (C1/C3.3 semantics, at-least-once, idempotent).
