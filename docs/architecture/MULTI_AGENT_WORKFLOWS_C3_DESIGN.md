@@ -357,3 +357,18 @@ crée aucun doublon (index d'unicité par rang). Un run terminal ne crée rien. 
 ### Limites
 Séquence uniquement entre groupes (un groupe à la fois) ; pas de limite par fournisseur ; pas de reprise manuelle en parallèle ; réservation conservatrice et configurable ; pas de `SKIP LOCKED` ; validation sur conteneurs
 recréés non rejouée (voir le rapport) ; connectivité Anthropic réelle NON VÉRIFIÉE.
+
+## 14. Interface de gestion des workflows (C3.5, implémenté et testé)
+
+Aucune modification du Core API ni de l'orchestrateur : l'interface lit et demande, **le Core API reste l'autorité**. Détails : `docs/SPRINT_C3_5_IMPLEMENTATION_REPORT.md`
+et `apps/desktop/README.md`.
+
+* **Routes** : `/workflows` (aperçu, workflows, runs, approbations), `/workflows/new`, `/workflows/:id`, `/workflows/:id/edit`, `/workflows/runs/:runId`.
+* **Contrats** : modèles TypeScript `core/workflows/workflows.models.ts` vérifiés contre des **réponses réelles** du Core API (test de capture Java → `real-api-c3.ts`).
+* **États affichés fidèlement** : `QUEUED` (« en attente de capacité », aucune exécution), « dispatched » tant que l'exécution enfant n'est pas confirmée `RUNNING`
+  (lecture bornée des exécutions vivantes), `WAITING_APPROVAL`, tentative échouée (jamais un résultat), `OUTCOME_UNKNOWN` (jamais présenté comme échec simple, annulation
+  ou rejouable). Les retries sont de nouvelles tentatives qui conservent les précédentes.
+* **Mise à jour** : polling borné (`RunMonitor`), pas de WebSocket/SSE (inexistants) ; la chronologie est reconstruite depuis les enregistrements persistés.
+* **Récupération manuelle** : proposée uniquement pour un run séquentiel en `WAITING_RECOVERY` dont l'échec est connu et sûr ; pour les workers parallèles, l'interface
+  explique que cette capacité n'existe pas. Le Core API répond `409` sinon.
+* **Allowlist Electron** : seuls les endpoints workflow nommés sont joignables (jamais `/internal/**`, jamais un changement d'état forcé), avec tests de refus.

@@ -14,6 +14,7 @@ export interface NavItem {
 export const MAIN_NAVIGATION: readonly NavItem[] = [
   { label: 'Overview', icon: 'dashboard', route: '/dashboard' },
   { label: 'Agents', icon: 'agent', route: '/agents' },
+  { label: 'Workflows', icon: 'workflow', route: '/workflows' },
   { label: 'Organization', icon: 'organization', route: '/organization' },
   { label: 'Projects', icon: 'projects', route: '/projects' },
   { label: 'Communication', icon: 'messages', route: '/communication', badge: 'unread-messages' },

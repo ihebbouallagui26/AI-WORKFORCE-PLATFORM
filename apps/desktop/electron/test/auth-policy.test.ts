@@ -183,6 +183,59 @@ describe('resolveApiRequest', () => {
     }
   });
 
+  it('allows the workflow operations of Sprints C3.1 to C3.4 and nothing else', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const allowed = [
+      { method: 'GET', path: `${base}/workflows`, query: { status: 'ACTIVE', page: 0, size: 20 } },
+      { method: 'POST', path: `${base}/workflows`, body: { name: 'W', mode: 'PIPELINE', maxParallelWorkers: 3 } },
+      { method: 'GET', path: `${base}/workflows/${ORG}` },
+      { method: 'PATCH', path: `${base}/workflows/${ORG}`, body: { failurePolicy: 'CONTINUE' } },
+      { method: 'PUT', path: `${base}/workflows/${ORG}/participants`, body: { agentIds: [ORG], coordinatorAgentId: ORG } },
+      { method: 'PUT', path: `${base}/workflows/${ORG}/steps`, body: { steps: [] } },
+      { method: 'POST', path: `${base}/workflows/${ORG}/archive`, body: {} },
+      { method: 'POST', path: `${base}/workflows/${ORG}/runs`, body: { objective: 'Analyze', requestId: 'r-1' } },
+      { method: 'GET', path: `${base}/workflow-runs`, query: { status: 'WAITING_RECOVERY', definitionId: ORG, page: 0, size: 50 } },
+      { method: 'GET', path: `${base}/workflow-runs/${ORG}` },
+      { method: 'GET', path: `${base}/workflow-runs/${ORG}/steps`, query: { page: 0, size: 100 } },
+      { method: 'GET', path: `${base}/workflow-runs/${ORG}/messages`, query: { page: 0, size: 100 } },
+      { method: 'GET', path: `${base}/workflow-runs/${ORG}/actions` },
+      { method: 'GET', path: `${base}/workflow-runs/${ORG}/summary` },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/cancel`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/3/retry`, body: {} },
+    ];
+    for (const request of allowed) {
+      assert.ok(resolveApiRequest(request, API).ok, JSON.stringify(request));
+    }
+  });
+
+  it('refuses workflow requests that are malformed, forged or service-only', () => {
+    const base = `/api/v1/organizations/${ORG}`;
+    const refused = [
+      // Only the platform (the scheduler, the coordinator's native actions) moves a workflow: no service endpoint, no forged state.
+      { method: 'POST', path: `/api/v1/internal/organizations/${ORG}/executions/${ORG}/workflow-actions`, body: { action: 'workflow.finish' } },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/complete`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/finish`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/1/skip`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/1/complete`, body: {} },
+      { method: 'PUT', path: `${base}/workflow-runs/${ORG}`, body: { status: 'SUCCEEDED' } },
+      { method: 'PATCH', path: `${base}/workflow-runs/${ORG}`, body: { status: 'SUCCEEDED' } },
+      { method: 'DELETE', path: `${base}/workflow-runs/${ORG}` },
+      { method: 'DELETE', path: `${base}/workflows/${ORG}` },
+      { method: 'POST', path: `${base}/workflow-runs`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/retry`, body: {} },
+      // Malformed identifiers and step numbers.
+      { method: 'GET', path: `${base}/workflows/not-a-uuid` },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/abc/retry`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/1/retry/../cancel`, body: {} },
+      { method: 'POST', path: `${base}/workflow-runs/${ORG}/steps/123/retry`, body: {} },
+      { method: 'GET', path: `${base}/workflow-runs`, query: { definitionId: 'not-a-uuid' } },
+      { method: 'GET', path: `${base}/workflow-runs`, query: { definitionId: `${ORG}' OR 1=1` } },
+    ];
+    for (const request of refused) {
+      assert.ok(!resolveApiRequest(request, API).ok, JSON.stringify(request));
+    }
+  });
+
   it('refuses agent and provider requests that are malformed or not part of the API', () => {
     const base = `/api/v1/organizations/${ORG}`;
     const refused = [
