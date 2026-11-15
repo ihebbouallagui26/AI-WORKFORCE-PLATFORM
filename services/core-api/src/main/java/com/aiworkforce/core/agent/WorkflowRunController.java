@@ -87,6 +87,15 @@ public class WorkflowRunController {
                 PageParams.of(page, size, Sort.by(Sort.Order.asc("sequence")))), Function.identity());
     }
 
+    @GetMapping("/workflow-runs/{runId}/actions")
+    @Operation(operationId = "listWorkflowRunActions", summary = "The coordinator actions of a run (delegations and finish), accepted or rejected")
+    public PageResponse<WorkflowViews.ActionView> actions(@PathVariable UUID organizationId, @PathVariable UUID runId,
+            AuthenticatedUser user, @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(PageParams.MAX_SIZE) int size) {
+        return PageResponse.of(runs.actions(organizationId, runId, user,
+                PageParams.of(page, size, Sort.by(Sort.Order.asc("createdAt"), Sort.Order.asc("id")))), Function.identity());
+    }
+
     @PostMapping("/workflow-runs/{runId}/cancel")
     @Operation(operationId = "cancelWorkflowRun",
             summary = "Request cooperative cancellation: nothing new starts; started steps are not undone")

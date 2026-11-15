@@ -271,3 +271,25 @@ com.aiworkforce.core
 ```
 
 Future business modules (`agent`, `project`…) are sibling packages, following the rules in the architecture document and enforced by `ArchitectureTest`.
+
+## AI coordinator and dynamic delegation (Sprint C3.2)
+
+A workflow may be `mode: COORDINATED`: instead of static steps, a chosen **coordinator agent** (a real B3 agent, also an explicit
+participant, with its own provider credential) decides what happens next. The Core API stays the only authority: *the Core API decides what
+is allowed, the coordinator decides what should happen next, workers execute only what they are explicitly authorized to perform.*
+`PIPELINE` (C3.1) is unchanged. Design: [`docs/architecture/MULTI_AGENT_WORKFLOWS_C3_DESIGN.md`](../../docs/architecture/MULTI_AGENT_WORKFLOWS_C3_DESIGN.md) §11.
+
+- `V8__workflow_coordinator.sql` is additive: `mode` and `coordinator_agent_id` on definitions, `mode` on runs, `COORDINATOR` step role,
+  and `workflow_actions` (idempotent per coordinator execution and provider `tool_call_id`, one accepted action per turn, no repeated
+  `(worker, task)`). V1–V7 are untouched.
+- Create with `mode: COORDINATED`; `PUT …/participants` takes `coordinatorAgentId` (must be among `agentIds`); a coordinated workflow has no
+  static steps and needs at least one worker besides the coordinator to start. The run snapshot freezes mode, coordinator and
+  participants, and names workers by opaque refs (`worker_1`, …).
+- Each coordinator turn and each worker step is a child execution (C1). The coordinator has only two **platform-native actions**,
+  `workflow.delegate` and `workflow.finish` (not MCP tools; a coordinator turn can reach no MCP tool). The orchestrator forwards them to
+  `POST /api/v1/internal/organizations/{org}/executions/{executionId}/workflow-actions` (service account only); the Core API validates
+  (participant, state, budgets, step capacity, requester authorization, duplicates, one action per turn), records them (accepted or
+  rejected, with a code) **before** anything starts, and the scheduler creates the worker. `GET …/workflow-runs/{runId}/actions` lists them.
+- Limits: ≤ 8 worker steps, depth 1, sequential; coordinator turns ≤ `maxSteps + 1`; cumulative token and time budgets include the
+  coordinator; a turn without an action gets one corrective turn, then `COORDINATOR_NO_ACTION`. Approvals remain C2 approvals on the workers' tools.
+- Anthropic real connectivity is **NOT VERIFIED**; tests use a simulated provider.

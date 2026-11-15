@@ -13,13 +13,19 @@ A tool call is executed at most once: nothing here retries a call whose outcome 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from app.clients.contracts import ResumeInfo
-from app.clients.core_api_client import CoreApiClient, CoreApiConflict, CoreApiForbidden, CoreApiNotFound
+from app.clients.contracts import PlatformAction, ResumeInfo
+from app.clients.core_api_client import (
+    CoreApiClient,
+    CoreApiConflict,
+    CoreApiForbidden,
+    CoreApiNotFound,
+    CoreApiUnavailable,
+)
 from app.core.errors import OrchestratorError
 from app.core.logging import get_logger
 from app.mcp.executor import McpServerManager, ToolExecutionError
@@ -72,6 +78,19 @@ class Paused:
     approval_id: UUID | None
 
 
+def platform_alias(action_name: str) -> str:
+    """Provider tool names cannot contain a dot: ``workflow.delegate`` is shown as ``workflow_delegate``."""
+    return action_name.replace(".", "_")
+
+
+@dataclass(frozen=True)
+class ActionTaken:
+    """The Core API accepted the coordinator control action: the turn is over, nothing else may happen in it."""
+
+    action: str
+    message: str
+
+
 class LoopFailure(OrchestratorError):
     """A safe, coded failure of the loop (round limit, ...)."""
 
@@ -92,12 +111,23 @@ class LoopDeps:
     model: str
     max_output_tokens: int
     offered: dict[str, OfferedTool]  # alias -> tool
-    manager: McpServerManager
+    manager: McpServerManager | None
     max_rounds: int
     max_tool_calls: int
     output_max_chars: int
+    # C3.2: a coordinator turn offers ONLY these platform actions (alias -> action) and never an MCP tool.
+    platform: dict[str, PlatformAction] = field(default_factory=dict)
+
+    @property
+    def coordinator(self) -> bool:
+        return bool(self.platform)
 
     def specs(self) -> list[ToolSpec]:
+        if self.coordinator:
+            return [
+                ToolSpec(name=alias, description=action.description[:1000], input_schema=action.input_schema)
+                for alias, action in self.platform.items()
+            ]
         return [
             ToolSpec(
                 name=t.alias,
@@ -138,6 +168,13 @@ async def run_loop(deps: LoopDeps, state: LoopState, resume: ResumeInfo | None =
         pending = state.pending
         while pending.index < len(pending.uses):
             use = pending.uses[pending.index]
+            if deps.coordinator:
+                taken = await _handle_platform_action(deps, pending, use)
+                if isinstance(taken, ActionTaken):
+                    return Completed(text=taken.message)
+                pending.results.append(taken)
+                pending.index += 1
+                continue
             handled = await _handle_use(deps, state, pending, use, resume)
             resume = None  # a decision is consumed by the call it belongs to
             if isinstance(handled, Paused):
@@ -148,6 +185,35 @@ async def run_loop(deps: LoopDeps, state: LoopState, resume: ResumeInfo | None =
             pending.awaiting_invocation = None
         state.messages.append(TurnMessage(role="user", content=list(pending.results)))
         state.pending = None
+
+
+async def _handle_platform_action(
+    deps: LoopDeps, pending: PendingTools, use: ToolUseBlock
+) -> ToolResultBlock | ActionTaken:
+    """Forwards ONE coordinator action to the Core API and reports its decision back to the model.
+
+    The orchestrator interprets nothing: it checks the name and the argument shape, forwards, and relays the answer.
+    Only the first action of a turn is forwarded; any other in the same turn is refused here without a request."""
+    action = deps.platform.get(use.name)
+    if action is None:
+        return _error_block(use, "Unknown action. Only the provided workflow actions exist.")  # never reaches a tool
+    if pending.index > 0:
+        return _error_block(use, "Only one action per turn is allowed.")
+    problem = validate_arguments(action.input_schema, use.input)
+    if problem is not None:
+        return _error_block(use, problem)
+    try:
+        result = await deps.core.submit_workflow_action(
+            deps.organization_id, deps.execution_id, tool_call_id=use.id, action=action.name, arguments=use.input
+        )
+    except CoreApiUnavailable as exc:
+        raise LoopFailure("COORDINATION_UNAVAILABLE") from exc
+    except (CoreApiConflict, CoreApiForbidden, CoreApiNotFound) as exc:
+        raise LoopFailure("COORDINATION_REJECTED") from exc
+    if result.status == "ACCEPTED":
+        return ActionTaken(action=action.name, message=f"{action.name} accepted.")
+    reason = f"The action was rejected ({result.code or 'REJECTED'}): {result.message}"
+    return _error_block(use, reason[:300])
 
 
 async def _handle_use(

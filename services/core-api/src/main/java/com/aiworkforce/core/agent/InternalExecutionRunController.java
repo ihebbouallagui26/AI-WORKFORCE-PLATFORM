@@ -9,7 +9,9 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 import java.util.UUID;
+import tools.jackson.databind.JsonNode;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -33,11 +35,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalExecutionRunController {
 
     @Schema(name = "ExecutionStarted")
-    public record Started(UUID executionId, UUID agentId, String task) {
+    public record Started(UUID executionId, UUID agentId, String task,
+            @Schema(description = "COORDINATOR when this execution is a workflow coordinator turn, otherwise null") String workflowRole,
+            @Schema(description = "Platform-native actions offered ONLY to a coordinator turn (never MCP tools)") List<PlatformAction> platformActions) {
 
-        static Started of(StartedExecution started) {
-            return new Started(started.executionId(), started.agentId(), started.task());
+        static Started of(StartedExecution started, boolean coordinatorTurn) {
+            return new Started(started.executionId(), started.agentId(), started.task(), coordinatorTurn ? "COORDINATOR" : null,
+                    coordinatorTurn ? WorkflowActionCatalog.actions() : List.of());
         }
+    }
+
+    @Schema(name = "PlatformAction")
+    public record PlatformAction(String name, String description, @Schema(type = "object") JsonNode inputSchema) {
     }
 
     /** The one place a decrypted credential leaves the Core API. Its {@code toString} is redacted. */
@@ -65,14 +74,18 @@ public class InternalExecutionRunController {
 
     private final ExecutionCoordinator coordinator;
 
-    public InternalExecutionRunController(ExecutionCoordinator coordinator) {
+    private final WorkflowActionService workflowActions;
+
+    public InternalExecutionRunController(ExecutionCoordinator coordinator, WorkflowActionService workflowActions) {
         this.coordinator = coordinator;
+        this.workflowActions = workflowActions;
     }
 
     @PostMapping("/start")
     @Operation(operationId = "startExecutionRun", summary = "PENDING to RUNNING; returns the instruction and agent")
     public Started start(@PathVariable UUID organizationId, @PathVariable UUID executionId) {
-        return Started.of(coordinator.start(organizationId, executionId));
+        StartedExecution started = coordinator.start(organizationId, executionId);
+        return Started.of(started, workflowActions.isCoordinatorTurn(organizationId, executionId));
     }
 
     @PostMapping("/credential")

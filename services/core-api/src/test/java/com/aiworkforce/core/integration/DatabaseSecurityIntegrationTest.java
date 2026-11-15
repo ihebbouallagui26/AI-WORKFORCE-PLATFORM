@@ -117,7 +117,7 @@ class DatabaseSecurityIntegrationTest {
                     .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
                     .load().migrate();
             assertThat(result.success).isTrue();
-            assertThat(result.targetSchemaVersion).isEqualTo("7");
+            assertThat(result.targetSchemaVersion).isEqualTo("8");
         }
     }
 
@@ -485,7 +485,7 @@ class DatabaseSecurityIntegrationTest {
                 }
             }
 
-            var result = flyway.apply("latest").migrate();
+            var result = flyway.apply("7").migrate();
             assertThat(result.success).isTrue();
             assertThat(result.migrationsExecuted).isEqualTo(1);
             assertThat(result.targetSchemaVersion).isEqualTo("7");
@@ -513,7 +513,7 @@ class DatabaseSecurityIntegrationTest {
                         + "created_at, updated_at) VALUES ('" + UUID.randomUUID() + "', '" + organization + "', 'x', 0, '" + user + "', now(), now())"))
                         .isInstanceOf(java.sql.SQLException.class);
             }
-            flyway.apply("latest").validate();
+            flyway.apply("7").validate();
             try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
                     TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
                     java.sql.Statement statement = connection.createStatement()) {
@@ -531,6 +531,79 @@ class DatabaseSecurityIntegrationTest {
                         + UUID.randomUUID() + "', '" + organization + "', '00000000-0000-0000-0000-0000000000e1', 1, 'OBJECTIVE', 'o', now())");
                 assertThatThrownBy(() -> statement.execute("UPDATE workflow_messages SET body = 'changed'")).isInstanceOf(java.sql.SQLException.class);
                 assertThatThrownBy(() -> statement.execute("DELETE FROM workflow_messages")).isInstanceOf(java.sql.SQLException.class);
+            }
+        }
+    }
+
+    /**
+     * A C3.1 database (V1..V7 with a pipeline definition and a run already recorded) upgrades to V8: existing rows become
+     * PIPELINE, the coordinator is only allowed on a COORDINATED definition, the action table enforces idempotency and one
+     * accepted action per coordinator turn, and the runtime role keeps DML without DDL.
+     */
+    @Test
+    void upgradesAnExistingC31DatabaseAndAddsTheCoordinator() throws Exception {
+        try (PostgreSQLContainer postgres = new PostgreSQLContainer(TestcontainersConfiguration.POSTGRES_IMAGE)) {
+            postgres.start();
+            TestcontainersConfiguration.createRoles(postgres);
+            java.util.function.Function<String, Flyway> flyway = target -> Flyway.configure()
+                    .dataSource(postgres.getJdbcUrl(), TestcontainersConfiguration.MIGRATION_USER,
+                            TestcontainersConfiguration.MIGRATION_PASSWORD)
+                    .locations("classpath:db/migration").target(target)
+                    .placeholders(java.util.Map.of("app_role", TestcontainersConfiguration.APP_USER))
+                    .load();
+            flyway.apply("7").migrate();
+            UUID user = UUID.randomUUID();
+            UUID organization = UUID.randomUUID();
+            UUID definition = UUID.randomUUID();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("INSERT INTO user_accounts (id, email, email_verified, display_name, status, created_at, "
+                        + "updated_at) VALUES ('" + user + "', 'c31@example.test', true, 'C31', 'ACTIVE', now(), now())");
+                statement.execute("INSERT INTO organizations (id, name, created_by, created_at, updated_at) VALUES ('"
+                        + organization + "', 'Existing C31 organization', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, created_by, created_at, updated_at) VALUES ('"
+                        + definition + "', '" + organization + "', 'pipeline', '" + user + "', now(), now())");
+                statement.execute("INSERT INTO workflow_runs (id, organization_id, definition_id, definition_version, snapshot, requested_by, "
+                        + "objective, status, total_steps, token_budget, deadline_at, created_at, updated_at) VALUES ('"
+                        + UUID.randomUUID() + "', '" + organization + "', '" + definition + "', 1, '{}', '" + user
+                        + "', 'o', 'PENDING', 1, 1000, now(), now(), now())");
+            }
+            var result = flyway.apply("latest").migrate();
+            assertThat(result.success).isTrue();
+            assertThat(result.migrationsExecuted).isEqualTo(1);
+            assertThat(result.targetSchemaVersion).isEqualTo("8");
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    postgres.getUsername(), postgres.getPassword());
+                    java.sql.Statement statement = connection.createStatement()) {
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT (SELECT count(*) FROM workflow_definitions WHERE mode = 'PIPELINE' "
+                        + "AND coordinator_agent_id IS NULL), (SELECT count(*) FROM workflow_runs WHERE mode = 'PIPELINE')")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(1);
+                    assertThat(rows.getInt(2)).isEqualTo(1);
+                }
+                // A pipeline never has a coordinator; the mode is one of the two known values.
+                assertThatThrownBy(() -> statement.execute("INSERT INTO workflow_definitions (id, organization_id, name, mode, created_by, "
+                        + "created_at, updated_at) VALUES ('" + UUID.randomUUID() + "', '" + organization + "', 'x', 'OTHER', '" + user
+                        + "', now(), now())")).isInstanceOf(java.sql.SQLException.class);
+                // The run counters allow a coordinated run (up to 8 workers plus 9 coordinator turns).
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT count(*) FROM pg_constraint WHERE conname IN "
+                        + "('uq_workflow_actions_call', 'ck_workflow_actions_action', 'ck_workflow_steps_role')")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(3);
+                }
+                try (java.sql.ResultSet rows = statement.executeQuery("SELECT count(*) FROM pg_indexes WHERE indexname IN "
+                        + "('uq_workflow_actions_one_per_turn', 'uq_workflow_actions_no_repeat')")) {
+                    rows.next();
+                    assertThat(rows.getInt(1)).isEqualTo(2);
+                }
+            }
+            flyway.apply("latest").validate();
+            try (java.sql.Connection connection = java.sql.DriverManager.getConnection(postgres.getJdbcUrl(),
+                    TestcontainersConfiguration.APP_USER, TestcontainersConfiguration.APP_PASSWORD);
+                    java.sql.Statement statement = connection.createStatement()) {
+                statement.execute("SELECT count(*) FROM workflow_actions");
+                assertThatThrownBy(() -> statement.execute("ALTER TABLE workflow_actions ADD COLUMN x int")).isInstanceOf(java.sql.SQLException.class);
             }
         }
     }

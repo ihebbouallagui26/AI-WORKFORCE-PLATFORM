@@ -3238,6 +3238,52 @@
         }
       }
     },
+    "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/workflow-actions" : {
+      "post" : {
+        "tags" : [ "Internal (orchestrator)" ],
+        "summary" : "Validate and record a coordinator workflow.delegate or workflow.finish",
+        "operationId" : "submitWorkflowAction",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "executionId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/WorkflowActionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WorkflowActionResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/internal/organizations/{organizationId}/executions/{executionId}/tool-calls" : {
       "post" : {
         "tags" : [ "Internal (orchestrator)" ],
@@ -4916,6 +4962,70 @@
         }
       }
     },
+    "/api/v1/organizations/{organizationId}/workflow-runs/{runId}/actions" : {
+      "get" : {
+        "tags" : [ "Workflow runs" ],
+        "summary" : "The coordinator actions of a run (delegations and finish), accepted or rejected",
+        "operationId" : "listWorkflowRunActions",
+        "parameters" : [ {
+          "name" : "organizationId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "runId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "user",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "$ref" : "#/components/schemas/AuthenticatedUser"
+          }
+        }, {
+          "name" : "page",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 0,
+            "minimum" : 0
+          }
+        }, {
+          "name" : "size",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50,
+            "maximum" : 100,
+            "minimum" : 1
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PageResponseWorkflowAction"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organizations/{organizationId}/tools" : {
       "get" : {
         "tags" : [ "Skills and tools" ],
@@ -5956,6 +6066,14 @@
             "type" : "string",
             "enum" : [ "ACTIVE", "ARCHIVED" ]
           },
+          "mode" : {
+            "type" : "string",
+            "enum" : [ "PIPELINE", "COORDINATED" ]
+          },
+          "coordinatorAgentId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
           "version" : {
             "type" : "integer",
             "format" : "int32"
@@ -6019,6 +6137,9 @@
           "agentStatus" : {
             "type" : "string"
           },
+          "coordinator" : {
+            "type" : "boolean"
+          },
           "addedBy" : {
             "type" : "string",
             "format" : "uuid"
@@ -6066,6 +6187,11 @@
             },
             "maxItems" : 16,
             "minItems" : 0
+          },
+          "coordinatorAgentId" : {
+            "type" : "string",
+            "format" : "uuid",
+            "description" : "COORDINATED workflows only: the coordinator, who must also be listed in agentIds"
           }
         }
       },
@@ -6968,6 +7094,11 @@
             "maxLength" : 2000,
             "minLength" : 0
           },
+          "mode" : {
+            "type" : "string",
+            "description" : "PIPELINE (default, static ordered steps) or COORDINATED (a chosen coordinator agent delegates)",
+            "enum" : [ "PIPELINE", "COORDINATED" ]
+          },
           "maxSteps" : {
             "type" : "integer",
             "format" : "int32",
@@ -7030,6 +7161,10 @@
           "definitionVersion" : {
             "type" : "integer",
             "format" : "int32"
+          },
+          "mode" : {
+            "type" : "string",
+            "enum" : [ "PIPELINE", "COORDINATED" ]
           },
           "status" : {
             "type" : "string",
@@ -7789,6 +7924,43 @@
           }
         }
       },
+      "WorkflowActionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "toolCallId" : {
+            "type" : "string",
+            "maxLength" : 100,
+            "minLength" : 0
+          },
+          "action" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "arguments" : {
+            "type" : "string",
+            "description" : "The arguments exactly as the provider produced them"
+          }
+        },
+        "required" : [ "action", "toolCallId" ]
+      },
+      "WorkflowActionResult" : {
+        "type" : "object",
+        "properties" : {
+          "action" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
       "ToolCallRequest" : {
         "type" : "object",
         "properties" : {
@@ -7923,6 +8095,31 @@
             "format" : "uuid"
           },
           "task" : {
+            "type" : "string"
+          },
+          "workflowRole" : {
+            "type" : "string",
+            "description" : "COORDINATOR when this execution is a workflow coordinator turn, otherwise null"
+          },
+          "platformActions" : {
+            "type" : "array",
+            "description" : "Platform-native actions offered ONLY to a coordinator turn (never MCP tools)",
+            "items" : {
+              "$ref" : "#/components/schemas/PlatformAction"
+            }
+          }
+        }
+      },
+      "PlatformAction" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "inputSchema" : {
             "type" : "string"
           }
         }
@@ -8627,6 +8824,82 @@
           },
           "body" : {
             "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "PageResponseWorkflowAction" : {
+        "type" : "object",
+        "properties" : {
+          "content" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WorkflowAction"
+            }
+          },
+          "page" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "totalElements" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "totalPages" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
+      "WorkflowAction" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "stepId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "executionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "toolCallId" : {
+            "type" : "string"
+          },
+          "action" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "participantRef" : {
+            "type" : "string"
+          },
+          "task" : {
+            "type" : "string"
+          },
+          "inputRanks" : {
+            "type" : "string"
+          },
+          "resultStepId" : {
+            "type" : "string",
+            "format" : "uuid"
           },
           "createdAt" : {
             "type" : "string",

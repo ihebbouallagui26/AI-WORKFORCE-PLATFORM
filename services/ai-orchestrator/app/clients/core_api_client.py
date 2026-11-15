@@ -30,6 +30,7 @@ from app.clients.contracts import (
     ResumeInfo,
     ToolCallDecision,
     ToolCallStart,
+    WorkflowActionResult,
 )
 from app.core.errors import ForbiddenError, NotFoundError, OrchestratorError, UnavailableError
 from app.core.logging import get_logger
@@ -228,6 +229,18 @@ class CoreApiClient:
         except ValidationError as exc:
             raise CoreApiInvalidResponse from exc
 
+    async def submit_workflow_action(
+        self, organization_id: UUID, execution_id: UUID, *, tool_call_id: str, action: str, arguments: object
+    ) -> WorkflowActionResult:
+        """Forwards a coordinator action (C3.2). The Core API validates and records it; never retried (it is idempotent
+        per provider call id on the Core API side, so a caller that must retry can safely repeat the same id)."""
+        body = {"toolCallId": tool_call_id, "action": action, "arguments": arguments}
+        payload = await self._request("POST", self._run_path(organization_id, execution_id, "workflow-actions"), json=body)
+        try:
+            return WorkflowActionResult.model_validate(payload)
+        except ValidationError as exc:
+            raise CoreApiInvalidResponse from exc
+
     async def begin_tool_call(self, organization_id: UUID, execution_id: UUID, invocation_id: UUID) -> ToolCallStart:
         """The single moment a call may start (revalidated by the Core API). A 409 means: do not run it."""
         path = self._run_path(organization_id, execution_id, f"tool-calls/{invocation_id}/begin")
@@ -253,9 +266,7 @@ class CoreApiClient:
         message: str | None,
     ) -> None:
         body = {"success": success, "output": output, "truncated": truncated, "errorCode": error_code, "message": message}
-        await self._request(
-            "POST", self._run_path(organization_id, execution_id, f"tool-calls/{invocation_id}/complete"), json=body
-        )
+        await self._request("POST", self._run_path(organization_id, execution_id, f"tool-calls/{invocation_id}/complete"), json=body)
 
     async def resume_execution(self, organization_id: UUID, execution_id: UUID) -> ResumeInfo:
         """WAITING_APPROVAL to RUNNING, once per pause: a duplicate notification gets a 409."""

@@ -20,12 +20,12 @@ public final class WorkflowViews {
     }
 
     @Schema(name = "WorkflowParticipant")
-    public record ParticipantView(UUID agentId, String agentName, String agentStatus, UUID addedBy, Instant addedAt) {
+    public record ParticipantView(UUID agentId, String agentName, String agentStatus, boolean coordinator, UUID addedBy, Instant addedAt) {
     }
 
     @Schema(name = "WorkflowDefinition")
     public record DefinitionView(UUID id, UUID organizationId, String name, String description, WorkflowDefinitionStatus status,
-            int version, List<ParticipantView> participants, List<StepDefinitionView> steps, int maxSteps,
+            WorkflowMode mode, UUID coordinatorAgentId, int version, List<ParticipantView> participants, List<StepDefinitionView> steps, int maxSteps,
             int maxRetriesPerStep, int tokenBudget, int deadlineSeconds, UUID createdBy, Instant createdAt,
             Instant updatedAt, Instant archivedAt) {
 
@@ -34,24 +34,24 @@ public final class WorkflowViews {
                     .sorted(java.util.Comparator.comparing(WorkflowParticipant::getAddedAt).thenComparing(WorkflowParticipant::getId))
                     .map(p -> new ParticipantView(p.getAgentId(), agents.containsKey(p.getAgentId()) ? agents.get(p.getAgentId()).getName() : null,
                             agents.containsKey(p.getAgentId()) ? agents.get(p.getAgentId()).getStatus().name() : null,
-                            p.getAddedBy(), p.getAddedAt()))
+                            p.getAgentId().equals(d.getCoordinatorAgentId()), p.getAddedBy(), p.getAddedAt()))
                     .toList();
             List<StepDefinitionView> stepViews = WorkflowSpec.parseSteps(d.getSteps()).stream()
                     .map(s -> new StepDefinitionView(s.rank(), s.name(), s.agentId(), s.instruction(), s.inputsFrom())).toList();
-            return new DefinitionView(d.getId(), d.getOrganizationId(), d.getName(), d.getDescription(), d.getStatus(), d.getVersion(),
-                    people, stepViews, d.getMaxSteps(), d.getMaxRetriesPerStep(), d.getTokenBudget(), d.getDeadlineSeconds(),
+            return new DefinitionView(d.getId(), d.getOrganizationId(), d.getName(), d.getDescription(), d.getStatus(), d.getMode(),
+                    d.getCoordinatorAgentId(), d.getVersion(), people, stepViews, d.getMaxSteps(), d.getMaxRetriesPerStep(), d.getTokenBudget(), d.getDeadlineSeconds(),
                     d.getCreatedBy(), d.getCreatedAt(), d.getUpdatedAt(), d.getArchivedAt());
         }
     }
 
     @Schema(name = "WorkflowRun")
-    public record RunView(UUID id, UUID organizationId, UUID definitionId, int definitionVersion, WorkflowRunStatus status,
+    public record RunView(UUID id, UUID organizationId, UUID definitionId, int definitionVersion, WorkflowMode mode, WorkflowRunStatus status,
             UUID requestedBy, String objective, int totalSteps, int nextRank, int tokensUsed, int tokenBudget,
             Instant deadlineAt, String result, String errorCode, String errorMessage, Instant cancelRequestedAt,
             Instant createdAt, Instant startedAt, Instant completedAt) {
 
         static RunView of(WorkflowRun r) {
-            return new RunView(r.getId(), r.getOrganizationId(), r.getDefinitionId(), r.getDefinitionVersion(), r.getStatus(),
+            return new RunView(r.getId(), r.getOrganizationId(), r.getDefinitionId(), r.getDefinitionVersion(), r.getMode(), r.getStatus(),
                     r.getRequestedBy(), r.getObjective(), r.getTotalSteps(), r.getNextRank(), r.getTokensUsed(), r.getTokenBudget(),
                     r.getDeadlineAt(), r.getResult(), r.getErrorCode(), r.getErrorMessage(), r.getCancelRequestedAt(),
                     r.getCreatedAt(), r.getStartedAt(), r.getCompletedAt());
@@ -75,6 +75,16 @@ public final class WorkflowViews {
 
         static MessageView of(WorkflowMessage m) {
             return new MessageView(m.getId(), m.getSequence(), m.getStepRank(), m.getKind(), m.getBody(), m.getCreatedAt());
+        }
+    }
+
+    @Schema(name = "WorkflowAction")
+    public record ActionView(UUID id, UUID stepId, UUID executionId, String toolCallId, String action, String status, String code,
+            String message, String participantRef, String task, String inputRanks, UUID resultStepId, Instant createdAt) {
+
+        static ActionView of(WorkflowAction a) {
+            return new ActionView(a.getId(), a.getStepId(), a.getExecutionId(), a.getToolCallId(), a.getAction(), a.getStatus(),
+                    a.getCode(), a.getMessage(), a.getParticipantRef(), a.getTask(), a.getInputRanks(), a.getResultStepId(), a.getCreatedAt());
         }
     }
 }

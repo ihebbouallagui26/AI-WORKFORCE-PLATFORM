@@ -187,3 +187,32 @@ maximum, profondeur 1, participants choisis un par un, droits `workflow.read|man
 
 ### Hors périmètre, inchangé
 Coordinateur LLM, `workflow.delegate` / `workflow.finish`, parallélisme, délégation dynamique, communication entre workers, mémoire partagée, interface, nouveaux transports MCP, courtier de messages.
+
+## 11. Réalité de C3.2 (implémenté, vérifié) — coordinateur IA et délégation dynamique
+
+Principe : **le Core API décide ce qui est autorisé ; le coordinateur décide ce qui doit se passer ensuite ; les workers n'exécutent que les
+tâches pour lesquelles ils sont explicitement autorisés.** Le mode `PIPELINE` (C3.1) est inchangé ; le mode `COORDINATED` est additif.
+
+| Sujet | Implémentation |
+|---|---|
+| Schéma | migration additive **V8** : `mode` / `coordinator_agent_id` sur les définitions, `mode` sur les runs, rôle d'étape `COORDINATOR`, table `workflow_actions` (idempotence `(organisation, exécution coordinateur, tool_call_id)`, une action acceptée par tour, anti-répétition `(run, worker, hash de tâche)`). V1–V7 intacts |
+| Définition | `mode` = `PIPELINE` ou `COORDINATED` ; un workflow coordonné nomme un coordinateur qui est aussi un **participant explicite** ; aucune étape statique (`409`) ; le démarrage exige le coordinateur **et** au moins un worker |
+| Instantané | mode, coordinateur et participants figés dans le snapshot du run ; références **opaques** `coordinator`, `worker_1…` (jamais d'UUID, de connexion, de credential ni d'URL de service) |
+| Coordinateur | un vrai agent B3 (`ACTIVE`, fournisseur valide, **son propre** credential/binding) ; chaque tour de décision = une **exécution enfant C1** (étape de rôle `COORDINATOR`) ; sans état, reconstruit par le Core API à chaque tour (`WorkflowText.composeCoordinatorTask`) ; aucun superviseur LangGraph durable |
+| Actions | deux actions **natives de la plateforme** (pas des outils MCP, pas de faux serveur MCP) : `workflow.delegate {participantRef, task, inputRanks?}` et `workflow.finish {result}`. Servies par le Core API dans la réponse `start` d'un tour coordinateur (`workflowRole`, `platformActions`) ; un tour coordinateur n'a **aucun** outil MCP (`COORDINATOR_TOOLS_NOT_ALLOWED` côté `tool-calls`) |
+| Endpoint interne | `POST /api/v1/internal/organizations/{org}/executions/{executionId}/workflow-actions` (compte de service uniquement ; un jeton utilisateur ou une exécution non coordinatrice → `403`) ; résultat normalisé `{action, status, code, message}` |
+| Validation `delegate` | tour courant du coordinateur ; run actif (pas `CANCEL_REQUESTED`/terminal) ; une seule action par tour ; participant explicite et ≠ coordinateur ; agent encore `ACTIVE` et exécutable ; demandeur encore autorisé (`workflow.execute` + `agent.execute`) ; capacité d'étapes (≤ 8) ; échéance ; réserve de jetons (500) ; aucun worker actif ; tâche bornée (1500, masquée) ; `inputRanks` = étapes worker réussies ; pas de doublon `(worker, tâche normalisée)` |
+| Validation `finish` | tour courant ; run actif ; aucun worker actif ; résultat borné ; le run passe `SUCCEEDED` quand le tour coordinateur se termine |
+| Idempotence | `(exécution coordinateur, tool_call_id)` unique en base ; un rejeu renvoie le même résultat, un même identifiant avec d'autres arguments = `409` ; l'action est **persistée avant** la création de toute exécution suivante ; le worker n'est créé que par le planificateur, à la fin du tour |
+| Boucle | tour coordinateur → action `delegate` → worker (exécution enfant C1, avec **sa** propre identité, ses compétences, ses outils/approbations C2) → nouveau tour avec le résultat (donnée non fiable) → … → `finish` |
+| Bornes | 8 worker steps max, profondeur 1, séquentiel ; tours coordinateur ≤ `maxSteps + 1` (`COORDINATOR_TURN_LIMIT`) ; 3 rejets par tour au plus (`TOO_MANY_REJECTIONS`) ; tour sans action : **une** relance corrective, puis `COORDINATOR_NO_ACTION` ; budgets de jetons/temps **cumulés** (coordinateur inclus), contrôlés avant chaque tour et chaque worker |
+| Échec | `FAIL_FAST` conservé : un tour coordinateur échoué ne crée aucun worker ; reprise automatique seulement pour les erreurs fournisseur transitoires sans effet d'outil démarré ; `OUTCOME_UNKNOWN` jamais rejoué ; un run terminal n'est jamais relancé par un événement tardif (`RUN_NOT_ACTIVE`) |
+| Approbations | uniquement via C2, sur les outils MCP des **workers**. Une action de plateforme ne demande **jamais** d'approbation : elle est validée par le Core API (il n'existe pas d'équivalent « approbation de délégation » dans C2 ; lacune documentée, pas contournée par une fausse invocation MCP) |
+| API | `GET /workflow-runs/{runId}/actions` (acceptées et rejetées, avec code) ; `mode` sur définitions et runs ; `coordinatorAgentId` sur les participants ; API C3.1 rétro-compatible |
+
+### Écarts assumés
+* Pas de nouvel endpoint de contexte : le contexte du coordinateur est composé par le Core API dans la `task` de l'exécution (comme C3.1).
+* Le coordinateur ne peut ni ajouter de participant, ni modifier limites/permissions/fournisseur, ni outrepasser une approbation : aucune de ces actions n'existe.
+* **Connectivité Anthropic réelle : NON VÉRIFIÉE.** Les tests utilisent un adaptateur fournisseur simulé ; le comportement réel d'un modèle face aux deux actions n'est pas démontré.
+* Un échec de l'appel `workflow-actions` (Core API injoignable) fait échouer le tour (`COORDINATION_UNAVAILABLE`) : l'appel n'est jamais rejoué automatiquement par l'orchestrateur.
+* Séquentiel uniquement ; parallélisme, messages worker↔worker, délégation récursive, mémoire partagée, OpenAI/Gemini en tool-use, interface : différés.

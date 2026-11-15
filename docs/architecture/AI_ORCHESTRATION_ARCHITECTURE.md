@@ -144,3 +144,12 @@ In-process tasks (no restart survival; the Core API reaper fails them), polling 
 ### 9.7 Tools, approvals and sealed state (Sprint C2)
 
 Tool execution, human approval and the durable pause/resume are described in `docs/architecture/MCP_INTEGRATION_ARCHITECTURE.md`, `docs/architecture/APPROVAL_RECOVERY_ARCHITECTURE.md` and, for what is encrypted in checkpoints and how the key is provisioned, `docs/architecture/STATE_ENCRYPTION.md`.
+
+## 10. Workflow coordinator turns (Phase C3.2)
+
+A coordinated workflow turn is an ordinary supervised execution (section 9) whose `start` answer adds `workflowRole` and `platformActions`.
+For such a turn the graph (a) offers **no MCP tool**, (b) builds a coordinator system prompt, (c) runs the model loop with only the two
+platform actions, forwarding each through `CoreApiClient.submit_workflow_action`, and (d) ends the turn when the Core API accepts one.
+Everything that matters is decided and persisted by the Core API (`workflow_actions`); the orchestrator is stateless between turns, keeps nothing
+about the workflow in its checkpoints, and a coordinator turn never pauses for an approval. Failure codes added: `COORDINATION_UNAVAILABLE`
+(Core API unreachable while forwarding an action; not retried here) and `COORDINATION_REJECTED` (the Core API refused the call itself).

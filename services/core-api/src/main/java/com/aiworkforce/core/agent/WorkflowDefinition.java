@@ -42,6 +42,14 @@ public class WorkflowDefinition {
     @Column(nullable = false)
     private String steps;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false)
+    private WorkflowMode mode;
+
+    /** The coordinator agent of a COORDINATED workflow (also an explicit participant); null for a PIPELINE. */
+    @Column(name = "coordinator_agent_id")
+    private UUID coordinatorAgentId;
+
     @Column(name = "max_steps", nullable = false)
     private int maxSteps;
 
@@ -74,8 +82,9 @@ public class WorkflowDefinition {
     }
 
     WorkflowDefinition(UUID id, UUID organizationId, String name, String description, int maxSteps, int maxRetriesPerStep,
-            int tokenBudget, int deadlineSeconds, UUID createdBy, Instant now) {
+            int tokenBudget, int deadlineSeconds, UUID createdBy, WorkflowMode mode, Instant now) {
         this.id = id;
+        this.mode = mode;
         this.organizationId = organizationId;
         this.name = name;
         this.description = description;
@@ -121,6 +130,13 @@ public class WorkflowDefinition {
         bump(now);
     }
 
+    /** Chooses the coordinator of a COORDINATED workflow (null is only valid for a PIPELINE). */
+    void changeCoordinator(UUID agentId, Instant now) {
+        requireActive();
+        this.coordinatorAgentId = agentId;
+        bump(now);
+    }
+
     void replaceSteps(String json, Instant now) {
         requireActive();
         this.steps = json;
@@ -151,6 +167,8 @@ public class WorkflowDefinition {
     public String getDescription() { return description; }
     public WorkflowDefinitionStatus getStatus() { return status; }
     public int getVersion() { return version; }
+    public WorkflowMode getMode() { return mode; }
+    public UUID getCoordinatorAgentId() { return coordinatorAgentId; }
     public String getSteps() { return steps; }
     public int getMaxSteps() { return maxSteps; }
     public int getMaxRetriesPerStep() { return maxRetriesPerStep; }

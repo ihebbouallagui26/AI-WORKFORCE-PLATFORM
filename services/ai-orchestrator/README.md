@@ -60,3 +60,14 @@ Live provider smoke tests (**off by default**, never in CI; the catalog tests on
 * No credential is stored here: provider keys stay in the Core API SecretStore. State, logs and tool metadata are screened for secrets.
 * Only service tokens of allow-listed clients are accepted; desktop and user tokens are rejected.
 * The container runs as uid 10001 with a read-only filesystem and no capabilities.
+
+## Workflow coordinator turns (Sprint C3.2)
+
+When the Core API starts an execution that is a workflow **coordinator turn**, its `start` answer carries `workflowRole: COORDINATOR` and
+the two platform actions `workflow.delegate` / `workflow.finish` with their JSON schemas. The orchestrator then offers the model **only**
+those two actions (shown as `workflow_delegate` / `workflow_finish`: provider tool names cannot contain a dot) and **no MCP tool**. It does not
+interpret them: it checks the name and the argument shape, forwards each to the Core API (`POST …/workflow-actions`, idempotent per provider
+tool call id, never retried here), and relays the Core API decision to the model. Only the first action of a turn is forwarded; the turn
+ends as soon as one is accepted; a rejection is relayed so the model may choose again, bounded by the round limit and by the Core API.
+There is no long-lived supervisor and no workflow state in checkpoints. Tests (`tests/test_workflow_actions.py`) use a scripted provider
+adapter and a stubbed Core API; real Anthropic tool-use for this flow is **NOT VERIFIED**.
